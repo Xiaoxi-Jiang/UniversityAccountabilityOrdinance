@@ -30,19 +30,14 @@ We will collect and integrate the following datasets:
 UniversityAccountabilityOrdinance/
 ├── data/
 │   ├── raw/
-│   ├── processed/
-│   └── README.md
+│   └── processed/
 ├── notebooks/
 ├── src/
-│   ├── ingest/
-│   ├── clean/
-│   ├── integrate/
+│   ├── data/
 │   ├── analysis/
 │   └── viz/
 ├── reports/
-│   ├── figures/
-│   ├── early_insights/
-│   └── final_report/
+│   └── figures/
 ├── requirements.txt
 └── README.md
 ```
