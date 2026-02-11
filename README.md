@@ -12,7 +12,6 @@ This project aims to enhance the transparency and accountability of off-campus s
 4. What landlords are non-compliant? Overall volume, severe violations.
    - Are there clusters of properties where landlords are non-compliant?
 5. How has the value of these off campus housing options changed over time?
-4. Data Needed & Collection Plan
 ## Datasets to Collect
 We will collect and integrate the following datasets:
 Building and Property Violations
