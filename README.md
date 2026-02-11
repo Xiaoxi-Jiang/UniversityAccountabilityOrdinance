@@ -14,13 +14,13 @@ This project aims to enhance the transparency and accountability of off-campus s
 5. How has the value of these off campus housing options changed over time?
 ## Datasets to Collect
 We will collect and integrate the following datasets:
-- Building and Property Violations
-- 311 Service Requests
-- SAM Addresses (Street Address Management)
-- Property Assessment Data
-- Student Housing Data (2016–2024)
-- Neighborhood shapefiles
-- City Council District shapefiles
+- Building and Property Violations: https://data.boston.gov/dataset/building-and-property-violations1/resource/800a2663-1d6a-46e7-9356-bedb70f5332c
+- 311 Service Requests: https://data.boston.gov/dataset/311-service-requests
+- SAM Addresses (Street Address Management): https://data.boston.gov/dataset/live-street-address-management-sam-addresses
+- Property Assessment Data: https://data.boston.gov/dataset/property-assessment
+- Student Housing Data (2016–2024): https://docs.google.com/spreadsheets/d/11X4VvywkSodvvTk5kkQH7gtNPGovCgBq/edit?usp=drive_link&ouid=107346197263951251461&rtpof=true&sd=true
+- Neighborhood shapefiles: https://data.boston.gov/dataset/boston-neighborhood-boundaries-approximated-by-2020-census-tracts
+- City Council District shapefiles: https://www.google.com/a/bu.edu/acs
 ### How We Will Collect It
 - Boston Open Data portal: download via API/CSV exports for violations, 311, SAM, and assessment datasets (and available boundaries). 
 - Client/course shared Google Drive: obtain Student Housing (2016–2024) and any supporting documentation. 
