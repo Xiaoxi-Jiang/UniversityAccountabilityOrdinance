@@ -48,6 +48,6 @@ UniversityAccountabilityOrdinance/
 └── README.md
 ```
 ## Team
-xiaoxij@bu.edu
-chez0212@bu.edu
-zywang1@bu.edu
+- xiaoxij@bu.edu
+- chez0212@bu.edu
+- zywang1@bu.edu
