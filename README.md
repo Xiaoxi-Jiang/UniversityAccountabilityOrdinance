@@ -14,17 +14,17 @@ This project aims to enhance the transparency and accountability of off-campus s
 5. How has the value of these off campus housing options changed over time?
 ## Datasets to Collect
 We will collect and integrate the following datasets:
-Building and Property Violations
-311 Service Requests
-SAM Addresses (Street Address Management)
-Property Assessment Data
-Student Housing Data (2016–2024)
-Neighborhood shapefiles
-City Council District shapefiles
+- Building and Property Violations
+- 311 Service Requests
+- SAM Addresses (Street Address Management)
+- Property Assessment Data
+- Student Housing Data (2016–2024)
+- Neighborhood shapefiles
+- City Council District shapefiles
 ### How We Will Collect It
-Boston Open Data portal: download via API/CSV exports for violations, 311, SAM, and assessment datasets (and available boundaries). 
-Client/course shared Google Drive: obtain Student Housing (2016–2024) and any supporting documentation. 
-Versioning & provenance: store raw snapshots in data/raw/ with fetch timestamps; store cleaned outputs in data/processed/ with data dictionaries and transformation logs.
+- Boston Open Data portal: download via API/CSV exports for violations, 311, SAM, and assessment datasets (and available boundaries). 
+- Client/course shared Google Drive: obtain Student Housing (2016–2024) and any supporting documentation. 
+- Versioning & provenance: store raw snapshots in data/raw/ with fetch timestamps; store cleaned outputs in data/processed/ with data dictionaries and transformation logs.
 ## Project Structure
 ```
 UniversityAccountabilityOrdinance/
