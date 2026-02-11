@@ -1,0 +1,4 @@
+property_key,normalized_address,address,district,latitude,longitude,landlord,sources
+0392e393287b,789 example rd,789 Example Rd,District 1,42.3581,-71.0620,Example Property LLC,assessment|sam|student
+487d3626bd5f,456 example ave,456 Example Ave,District 2,42.3518,-71.0655,Sample Holdings Inc,assessment|sam|student
+54bf6012f70a,123 example st,123 Example St,District 1,42.3605,-71.0582,Example Property LLC,assessment|sam|student

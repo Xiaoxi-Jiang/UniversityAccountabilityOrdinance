@@ -1,0 +1,33 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"district": "District 1"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-71.0700, 42.3550],
+          [-71.0500, 42.3550],
+          [-71.0500, 42.3700],
+          [-71.0700, 42.3700],
+          [-71.0700, 42.3550]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"district": "District 2"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-71.0750, 42.3450],
+          [-71.0550, 42.3450],
+          [-71.0550, 42.3550],
+          [-71.0750, 42.3550],
+          [-71.0750, 42.3450]
+        ]]
+      }
+    }
+  ]
+}

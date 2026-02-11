@@ -1,0 +1,7 @@
+address,owner_name,severity,description
+123 Example St,Example Property LLC,critical,Fire safety issue
+123 Example St,Example Property LLC,medium,Trash complaint
+789 Example Rd,Example Property LLC,severe,Unsafe wiring
+456 Example Ave,Sample Holdings Inc,low,Minor maintenance
+456 Example Ave,Sample Holdings Inc,medium,Window issue
+456 Example Ave,Sample Holdings Inc,high,Hazardous stairway
