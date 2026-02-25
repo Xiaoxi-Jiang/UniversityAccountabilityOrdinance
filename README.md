@@ -28,7 +28,7 @@ Collection method:
 - Processed outputs saved in `data/processed/`.
 - Versioned transformation logic under `src/`.
 
-## Segmented Schedule (Course-Aligned)
+## Segmented Schedule
 ### Phase 0: Proposal Finalization (Feb 25 - Mar 3)
 - Finalize research questions and measurable success metrics.
 - Lock target data schema and source list.
