@@ -1,47 +1,109 @@
-# University-Accountability-Ordinance
-This project aims to enhance the transparency and accountability of off-campus student housing data reported by higher education institutions. By examining and standardizing data from the past decade, the project seeks to understand the impact on housing affordability and inform land use decisions. The goal of this project is to better understand where students live, what percentage of renters are students in each district, and what are the housing conditions like where students live. The initiative involves collaboration with the Inspectional Services Department to restore and clarify housing violation data, develop tools to identify problematic landlords, and integrate data across city departments. This ordinance will establish clear criteria for data collection and reporting, ultimately creating a publicly accessible database to ensure compliance and promote responsible property management.
-## Project Overview
-This project aims to enhance the transparency and accountability of off-campus student housing data reported by higher education institutions. By examining and standardizing data from the past decade, the project seeks to understand the impact on housing affordability and inform land use decisions.
-## Key Research Questions
-### Base Questions
-1. What are the trends regarding student housing across the city, by district, e.g. what % of the rental housing is taken up by students for each district and how has this changed over time?
-2. What are the housing conditions for students living off-campus? 
-   - e.g. how many students per unit 
-   - Is the unit managed by a “bad landlord’ e.g. how many building violations have student housing
-3. What is the spectrum of violations and severity in regards to worst landlords classifications?
-4. What landlords are non-compliant? Overall volume, severe violations.
-   - Are there clusters of properties where landlords are non-compliant?
-5. How has the value of these off campus housing options changed over time?
-## Datasets to Collect
-We will collect and integrate the following datasets:
-- [Building and Property Violations](https://data.boston.gov/dataset/building-and-property-violations1/resource/800a2663-1d6a-46e7-9356-bedb70f5332c)
-- [311 Service Requests](https://data.boston.gov/dataset/311-service-requests)
-- [SAM Addresses (Street Address Management)](https://data.boston.gov/dataset/live-street-address-management-sam-addresses)
-- [Property Assessment Data](https://data.boston.gov/dataset/property-assessment)
-- [Student Housing Data (2016–2024)](https://docs.google.com/spreadsheets/d/11X4VvywkSodvvTk5kkQH7gtNPGovCgBq/edit?usp=drive_link&ouid=107346197263951251461&rtpof=true&sd=true)
-- [Neighborhood shapefiles](https://data.boston.gov/dataset/boston-neighborhood-boundaries-approximated-by-2020-census-tracts)
-- [City Council District shapefiles](https://www.google.com/a/bu.edu/acs)
-### How We Will Collect It
-- Boston Open Data portal: download via API/CSV exports for violations, 311, SAM, and assessment datasets (and available boundaries). 
-- Client/course shared Google Drive: obtain Student Housing (2016–2024) and any supporting documentation. 
-- Versioning & provenance: store raw snapshots in data/raw/ with fetch timestamps; store cleaned outputs in data/processed/ with data dictionaries and transformation logs.
-## Project Structure
-```
-UniversityAccountabilityOrdinance/
-├── data/
-│   ├── raw/
-│   └── processed/
-├── notebooks/
-├── src/
-│   ├── data/
-│   ├── analysis/
-│   └── viz/
-├── reports/
-│   └── figures/
-├── requirements.txt
-└── README.md
-```
+﻿# University Accountability Ordinance Data Project
+
 ## Team
 - xiaoxij@bu.edu
 - chez0212@bu.edu
 - zywang1@bu.edu
+
+## Project Description
+This project studies off-campus student housing in Boston and builds a reproducible data pipeline to evaluate accountability outcomes across neighborhoods, landlords, and time. We integrate housing, violations, and city service data to understand where students live, housing quality conditions, and compliance patterns.
+
+## Measurable Project Goals
+1. Estimate student rental concentration by district and year.
+2. Identify high-risk landlord/property patterns using violation severity and frequency features.
+3. Build a baseline predictive model for whether a property will receive a new severe violation in the next period.
+4. Produce clear visualizations for district-level trends and landlord risk distributions.
+
+## Data Sources and Collection Plan
+- Building and Property Violations: Boston Open Data CSV/API
+- 311 Service Requests: Boston Open Data CSV/API
+- SAM Addresses: Boston Open Data CSV/API
+- Property Assessment: Boston Open Data CSV/API
+- Student Housing (2016-2024): course/client shared spreadsheet
+- Neighborhood and council district boundaries: shapefiles from city/open sources
+
+Collection method:
+- Programmatic download of public datasets via URLs/API.
+- Raw snapshots saved in `data/raw/`.
+- Processed outputs saved in `data/processed/`.
+- Versioned transformation logic under `src/`.
+
+## Segmented Schedule (Course-Aligned)
+### Phase 0: Proposal Finalization (Feb 25 - Mar 3)
+- Finalize research questions and measurable success metrics.
+- Lock target data schema and source list.
+- Deliverable: proposal-quality README sections complete.
+
+### Phase 1: Data Collection + Cleaning (Mar 4 - Mar 24)
+- Implement reproducible data fetch scripts.
+- Implement first cleaning pass for core violation dataset (date parsing, missing values, de-duplication, status normalization).
+- Generate initial cleaned table and data quality summary.
+- Deliverable: runnable phase-1 pipeline and March check-in materials.
+
+### Phase 2: Feature Extraction + EDA (Mar 25 - Apr 14)
+- Engineer landlord/property and temporal features.
+- Build preliminary visualizations (district trends, severity distribution, violation density).
+- Deliverable: feature table v1 and exploratory figures.
+
+### Phase 3: Modeling + Evaluation (Apr 15 - Apr 24)
+- Train baseline models (e.g., logistic regression / tree-based models).
+- Evaluate with held-out split and report metrics.
+- Document limitations/failure cases.
+- Deliverable: reproducible model training script and results table.
+
+### Phase 4: Reproducibility Hardening + Final Report (Apr 25 - May 1)
+- Finalize Makefile commands and README runbook.
+- Add and stabilize tests + GitHub Actions workflow.
+- Publish final visualizations, result interpretation, and presentation video link.
+- Deliverable: submission-ready GitHub repository.
+
+## Current Stage Implementation: Phase 1
+This repository currently includes a phase-1 pipeline:
+- Downloads Boston violations data (`data/raw/violations.csv`)
+- Cleans and standardizes fields
+- Exports cleaned dataset (`data/processed/violations_clean.csv`)
+
+Run:
+```bash
+make install
+make phase1
+```
+
+## Build, Run, and Test
+```bash
+make install
+make phase1
+make test
+```
+
+Environment:
+- Python 3.10+
+- Tested on Windows PowerShell and GitHub Actions Ubuntu runner
+
+## Repository Layout
+```text
+UniversityAccountabilityOrdinance/
+  data/
+    raw/
+    processed/
+  src/
+    data/
+    analysis/
+    viz/
+  tests/
+  .github/workflows/
+  Makefile
+  requirements.txt
+  README.md
+```
+
+## Contributing
+1. Create a feature branch.
+2. Keep raw/processed data contracts stable.
+3. Add/update tests for data logic changes.
+4. Open a PR with a short validation note (`make test`, sample output paths).
+
+## Notes on Reproducibility
+- Use the Make targets as the single execution interface.
+- Keep source URLs and output paths centralized in pipeline code.
+- Avoid manual spreadsheet edits in processed outputs.
