@@ -1,10 +1,28 @@
-﻿.PHONY: install phase1 test
+PYTHON ?= python3
+
+.PHONY: install prepare-data build-features eda pipeline baseline-model phase1 phase2 test
 
 install:
-	python -m pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements.txt
 
-phase1:
-	python -m src.data.phase1_pipeline
+prepare-data:
+	$(PYTHON) -m src.data.violations
+
+build-features:
+	$(PYTHON) -m src.data.features
+
+eda:
+	$(PYTHON) -m src.analysis.eda
+
+pipeline:
+	$(PYTHON) -m src.pipeline
+
+baseline-model:
+	$(PYTHON) -m src.modeling.baseline_model
+
+phase1: prepare-data
+
+phase2: pipeline
 
 test:
-	pytest -q
+	$(PYTHON) -m pytest -q
