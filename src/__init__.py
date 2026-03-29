@@ -1,1 +1,1 @@
-﻿# src package marker
+"""University Accountability Ordinance project package."""

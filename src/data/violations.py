@@ -21,6 +21,7 @@ class Phase1Config:
     processed_dir: Path = Path("data/processed")
     raw_filename: str = "violations.csv"
     cleaned_filename: str = "violations_clean.csv"
+    prepare_optional_sources: bool = True
 
 
 def _standardize_columns(columns: list[str]) -> list[str]:
@@ -79,6 +80,55 @@ def clean_violations(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | None]:
+    """Preload optional non-violations datasets as cleaned Phase 1 outputs."""
+    from src.data.context.property import (
+        PropertyDataConfig,
+        load_parcels,
+        load_property_assessment,
+        load_rentsmart,
+    )
+    from src.data.context.student_housing import (
+        StudentHousingConfig,
+        save_clean_student_housing,
+    )
+
+    property_config = PropertyDataConfig(
+        raw_dir=config.raw_dir,
+        processed_dir=config.processed_dir,
+        property_assessment_clean_output=config.processed_dir / "property_assessment_clean.csv",
+        parcels_clean_output=config.processed_dir / "parcels_clean.csv",
+        rentsmart_clean_output=config.processed_dir / "rentsmart_clean.csv",
+        property_risk_output=config.processed_dir / "property_risk_table_v1.csv",
+    )
+    student_config = StudentHousingConfig(
+        raw_dir=config.raw_dir,
+        clean_output_path=config.processed_dir / "student_housing_clean.csv",
+        output_path=config.processed_dir / "student_housing_context_v1.csv",
+        summary_output_path=config.processed_dir / "student_housing_summary_v1.csv",
+    )
+
+    outputs: dict[str, Path | None] = {}
+    outputs["property_assessment_clean"] = (
+        property_config.property_assessment_clean_output
+        if load_property_assessment(property_config) is not None
+        else None
+    )
+    outputs["parcels_clean"] = (
+        property_config.parcels_clean_output
+        if load_parcels(property_config) is not None
+        else None
+    )
+    outputs["rentsmart_clean"] = (
+        property_config.rentsmart_clean_output
+        if load_rentsmart(property_config) is not None
+        else None
+    )
+    student_clean_path, _ = save_clean_student_housing(student_config)
+    outputs["student_housing_clean"] = student_clean_path
+    return outputs
+
+
 def run_phase1(config: Phase1Config) -> tuple[Path, Path]:
     raw_path = config.raw_dir / config.raw_filename
     cleaned_path = config.processed_dir / config.cleaned_filename
@@ -90,6 +140,11 @@ def run_phase1(config: Phase1Config) -> tuple[Path, Path]:
 
     cleaned_path.parent.mkdir(parents=True, exist_ok=True)
     cleaned.to_csv(cleaned_path, index=False)
+
+    if config.prepare_optional_sources:
+        optional_outputs = prepare_optional_phase1_sources(config)
+        for label, path in optional_outputs.items():
+            print(f"Phase 1 optional output {label}: {path or 'skipped'}")
 
     return raw_path, cleaned_path
 

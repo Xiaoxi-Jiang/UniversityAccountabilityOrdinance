@@ -4,6 +4,14 @@
 __pycache__/
 **/__pycache__/
 *.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+outputs/figures/*.png
+outputs/tables/*.csv
+!outputs/figures/.gitkeep
+!outputs/tables/.gitkeep
+reports/figures/*.png
+!reports/figures/.gitkeep
 data/raw/*.csv
 data/processed/*.csv
 !data/raw/.gitkeep
