@@ -12,8 +12,10 @@ from src.data.features import (
     clean_violator_name,
     first_available_column,
     load_phase2_source_data,
+    normalize_zip,
     prepare_violations_frame,
 )
+from src.viz.choropleth import plot_zip_level_choropleth
 from src.viz.plot_utils import plt, save_figure, truncate_labels
 from src.viz.phase2_visualizations import (
     Phase2VisualizationConfig,
@@ -170,7 +172,7 @@ def generate_property_risk_outputs(
         print("Skipping property-risk EDA: property risk table is unavailable.")
         return [], []
 
-    risk_df = pd.read_csv(property_risk_path)
+    risk_df = pd.read_csv(property_risk_path, low_memory=False)
     table_paths: list[Path] = []
     figure_paths: list[Path] = []
 
@@ -305,7 +307,7 @@ def generate_student_housing_outputs(
         print("Skipping student housing EDA: student housing context is unavailable.")
         return [], []
 
-    context_df = pd.read_csv(student_context_path)
+    context_df = pd.read_csv(student_context_path, low_memory=False)
     table_paths: list[Path] = []
     figure_paths: list[Path] = []
 
@@ -327,23 +329,40 @@ def generate_student_housing_outputs(
                 student_housing_metric=(student_metric_col, "sum"),
             )
             .reset_index()
-            .sort_values("student_housing_metric", ascending=False)
-            .head(15)
         )
+        summary[zip_col] = summary[zip_col].map(normalize_zip).astype("string")
+        summary = summary.dropna(subset=[zip_col])
+        if summary.empty:
+            return table_paths, figure_paths
+
+        table_summary = summary.sort_values("student_housing_metric", ascending=False).head(15)
         table_paths.append(
-            _write_table(summary, tables_dir / "student_housing_zip_context.csv")
+            _write_table(table_summary, tables_dir / "student_housing_zip_context.csv")
         )
-        plot_df = summary.sort_values("student_housing_metric", ascending=True)
-        figure_paths.append(
-            _save_barh_figure(
-                plot_df[zip_col],
-                plot_df["total_violations"],
-                "Violations in ZIP Codes With Student Housing Context",
-                "Violation Count",
-                "ZIP Code",
-                figures_dir / "student_housing_zip_context.png",
+        try:
+            figure_paths.append(
+                plot_zip_level_choropleth(
+                    summary,
+                    zip_col=zip_col,
+                    value_col="total_violations",
+                    output_path=figures_dir / "student_housing_zip_context.png",
+                    title="Boston ZIP Violations With Student Housing Context",
+                    legend_label="Violation Count",
+                )
             )
-        )
+        except Exception as exc:
+            print(f"Skipping student housing choropleth: {exc}")
+            plot_df = table_summary.sort_values("student_housing_metric", ascending=True)
+            figure_paths.append(
+                _save_barh_figure(
+                    plot_df[zip_col],
+                    plot_df["total_violations"],
+                    "Violations in ZIP Codes With Student Housing Context",
+                    "Violation Count",
+                    "ZIP Code",
+                    figures_dir / "student_housing_zip_context.png",
+                )
+            )
 
     return table_paths, figure_paths
 

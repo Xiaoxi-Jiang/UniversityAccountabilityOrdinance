@@ -13,6 +13,7 @@ outputs/tables/*.csv
 reports/figures/*.png
 !reports/figures/.gitkeep
 data/raw/*.csv
+data/raw/*.geojson
 data/processed/*.csv
 !data/raw/.gitkeep
 !data/processed/.gitkeep
