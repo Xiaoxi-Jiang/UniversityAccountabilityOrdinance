@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.analysis.checkin_summary import write_checkin_summary
-from src.analysis.eda import generate_student_housing_outputs
+from src.analysis.eda import generate_property_risk_outputs, generate_student_housing_outputs
 
 
 def test_generate_student_housing_outputs_writes_relationship_artifacts(tmp_path: Path):
@@ -23,10 +23,47 @@ def test_generate_student_housing_outputs_writes_relationship_artifacts(tmp_path
         tmp_path / "tables",
         tmp_path / "figures",
     )
+    relationship_df = pd.read_csv(tmp_path / "tables" / "student_housing_relationship.csv")
+    correlation_df = pd.read_csv(tmp_path / "tables" / "student_housing_correlation_summary.csv")
 
     assert any(path.name == "student_housing_relationship.csv" for path in table_paths)
     assert any(path.name == "student_housing_correlation_summary.csv" for path in table_paths)
     assert any(path.name == "student_housing_relationship.png" for path in figure_paths)
+    assert any(path.name == "student_housing_violation_intensity_by_zip.png" for path in figure_paths)
+    assert "students_per_property" in relationship_df.columns
+    assert "relationship_x_metric_column" in correlation_df.columns
+
+
+def test_generate_property_risk_outputs_uses_rate_for_property_class_chart(tmp_path: Path):
+    property_risk_path = tmp_path / "property_risk_table_v1.csv"
+    class_a = pd.DataFrame(
+        {
+            "property_key": [f"a{i}" for i in range(30)],
+            "total_violations": [2] * 30,
+            "open_violations": [0] * 30,
+            "assessment_lu_desc": ["Class A"] * 30,
+        }
+    )
+    class_b = pd.DataFrame(
+        {
+            "property_key": [f"b{i}" for i in range(30)],
+            "total_violations": [5] * 30,
+            "open_violations": [1] * 30,
+            "assessment_lu_desc": ["Class B"] * 30,
+        }
+    )
+    pd.concat([class_a, class_b], ignore_index=True).to_csv(property_risk_path, index=False)
+
+    table_paths, figure_paths = generate_property_risk_outputs(
+        property_risk_path,
+        tmp_path / "tables",
+        tmp_path / "figures",
+    )
+    class_df = pd.read_csv(tmp_path / "tables" / "violations_by_property_class.csv")
+
+    assert any(path.name == "violations_by_property_class.png" for path in figure_paths)
+    assert any(path.name == "violations_by_property_class.csv" for path in table_paths)
+    assert "violations_per_property" in class_df.columns
 
 
 def test_write_checkin_summary_mentions_new_target_and_student_relationship(tmp_path: Path):

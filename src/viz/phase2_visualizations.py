@@ -10,7 +10,6 @@ from src.data.features import (
     Phase2FeatureConfig,
     VIOLATION_TYPE_CANDIDATES,
     first_available_column,
-    generate_property_key,
     load_phase2_source_data,
     prepare_violations_frame,
 )
@@ -37,7 +36,6 @@ FIGURE_OUTPUT_GROUPS = {
     "status distribution": {"status_distribution.png"},
     "top violation types": {"top_violation_types.png"},
     "trend plot": {"district_trends.png", "violations_over_time.png"},
-    "violation density": {"violation_density.png"},
 }
 
 
@@ -101,13 +99,26 @@ def plot_severity_distribution(df: pd.DataFrame, output_dir: Path) -> Path:
     severity = _derive_severity_proxy(df)
 
     if severity is not None and severity.nunique(dropna=True) > 0:
-        counts = severity.fillna("unknown").value_counts().head(10)
+        ordered_labels = [
+            "high risk (proxy)",
+            "medium risk (proxy)",
+            "low risk (proxy)",
+            "uncategorized",
+            "unknown",
+        ]
+        counts = severity.fillna("unknown").value_counts()
+        counts = counts.reindex(
+            [label for label in ordered_labels if label in counts.index],
+            fill_value=0,
+        )
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.bar(counts.index.astype(str), counts.values)
-        ax.set_title("Violation Severity Distribution (Proxy-Based)")
+        bar_colors = ["#dc2626", "#f59e0b", "#2563eb", "#9ca3af", "#6b7280"][: len(counts)]
+        ax.bar(counts.index.astype(str), counts.values, color=bar_colors)
+        ax.set_title("Violation Severity Distribution (Proxy-Based Labels)")
         ax.set_xlabel("Severity Category")
         ax.set_ylabel("Violation Count")
         ax.tick_params(axis="x", rotation=30)
+        add_bar_labels(ax)
         return save_figure(output_dir / "severity_distribution.png")
 
     raise ValueError("Cannot generate severity distribution with current columns.")
@@ -119,13 +130,22 @@ def plot_status_distribution(df: pd.DataFrame, output_dir: Path) -> Path:
         raise ValueError("Cannot generate status distribution without a status column.")
 
     counts = df["status"].astype("string").fillna("unknown").value_counts()
+    percentages = counts / max(int(counts.sum()), 1) * 100
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.bar(counts.index.astype(str), counts.values)
+    bars = ax.bar(counts.index.astype(str), counts.values, color=["#2563eb", "#93c5fd", "#9ca3af"][: len(counts)])
     ax.set_title("Violation Status Distribution")
     ax.set_xlabel("Status")
     ax.set_ylabel("Violation Count")
     ax.tick_params(axis="x", rotation=30)
-    add_bar_labels(ax)
+    for bar, count, pct in zip(bars, counts.values, percentages.values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(counts.values) * 0.01,
+            f"{int(count)}\n({pct:.1f}%)",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
     return save_figure(output_dir / "status_distribution.png")
 
 
@@ -148,10 +168,11 @@ def plot_top_violation_types(df: pd.DataFrame, output_dir: Path) -> Path:
         raise ValueError("Cannot generate top violation types because no non-empty values were found.")
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.barh(wrap_labels(counts.index.to_series()), counts.values)
-    ax.set_title("Top Violation Types")
+    bars = ax.barh(wrap_labels(counts.index.to_series()), counts.values, color="#2563eb")
+    ax.set_title("Top 10 Violation Types by Count")
     ax.set_xlabel("Violation Count")
     ax.set_ylabel("Violation Type")
+    ax.bar_label(bars, fmt="%.0f", padding=3, fontsize=8)
     return save_figure(output_dir / "top_violation_types.png")
 
 
@@ -216,87 +237,31 @@ def plot_district_or_time_trends(
 
     date_label = "status timestamp" if usable_date_col == "status_dttm" else usable_date_col
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(trend.index, trend.values, marker="o", linewidth=1.5)
-    ax.set_title(f"Violations Over Time ({date_label})")
+    trend_df = trend.rename("monthly_count").to_frame()
+    trend_df["rolling_12m_avg"] = trend_df["monthly_count"].rolling(window=12, min_periods=3).mean()
+    ax.plot(
+        trend_df.index,
+        trend_df["monthly_count"],
+        linewidth=1.2,
+        color="#93c5fd",
+        alpha=0.9,
+        label="Monthly count",
+    )
+    if trend_df["rolling_12m_avg"].notna().any():
+        ax.plot(
+            trend_df.index,
+            trend_df["rolling_12m_avg"],
+            linewidth=2.5,
+            color="#1d4ed8",
+            label="12-month rolling average",
+        )
+    ax.set_title(f"Violations Over Time ({date_label}; monthly with rolling average)")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Violation Count")
     ax.tick_params(axis="x", rotation=45)
+    ax.grid(axis="y", alpha=0.2)
+    ax.legend()
     return save_figure(output_dir / "violations_over_time.png")
-
-
-def _best_concentration_series(df: pd.DataFrame) -> tuple[pd.Series, str, str]:
-    """Choose the most interpretable concentration view supported by current columns."""
-    if "property_key" in df.columns:
-        property_counts = (
-            df["property_key"].astype("string").fillna("unknown_property").value_counts()
-        )
-        repeated = property_counts[property_counts > 1]
-        if not repeated.empty:
-            return (
-                repeated.head(15).sort_values(ascending=True),
-                "Violation Concentration at Repeated Property Keys",
-                "Property Key",
-            )
-
-    if "violation_st" in df.columns:
-        address_counts = (
-            df["violation_st"].astype("string").replace("", pd.NA).dropna().value_counts()
-        )
-        repeated = address_counts[address_counts > 1]
-        if not repeated.empty:
-            return (
-                repeated.head(15).sort_values(ascending=True),
-                "Top Addresses by Violation Count",
-                "Address",
-            )
-
-    if "violation_zip" in df.columns:
-        zip_counts = (
-            df["violation_zip"].astype("string").replace("", pd.NA).dropna().value_counts()
-        )
-        return (
-            zip_counts.head(15).sort_values(ascending=True),
-            "Violation Concentration by ZIP Code",
-            "ZIP Code",
-        )
-
-    if "property_key" in df.columns:
-        property_counts = (
-            df["property_key"].astype("string").fillna("unknown_property").value_counts()
-        )
-        concentration = pd.Series(
-            {
-                "1 violation": int(property_counts.eq(1).sum()),
-                "2 violations": int(property_counts.eq(2).sum()),
-                "3+ violations": int(property_counts.ge(3).sum()),
-            }
-        )
-        nonzero = concentration[concentration > 0]
-        return (
-            nonzero.sort_values(ascending=True),
-            "Violation Concentration Across Property Keys",
-            "Property Group",
-        )
-
-    raise ValueError("Cannot generate a concentration plot with current columns.")
-
-
-def plot_violation_density(df: pd.DataFrame, output_dir: Path) -> Path:
-    """Plot the best available concentration view supported by current location data."""
-    working = df.copy()
-    if "property_key" not in working.columns:
-        working.loc[:, "property_key"] = generate_property_key(working)
-
-    density, title, ylabel = _best_concentration_series(working)
-    if density.empty:
-        raise ValueError("Cannot generate a concentration plot because all candidate groupings are empty.")
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.barh(wrap_labels(density.index.to_series()), density.values)
-    ax.set_title(title)
-    ax.set_xlabel("Violation Count")
-    ax.set_ylabel(ylabel)
-    return save_figure(output_dir / "violation_density.png")
 
 
 def summarize_figure_results(paths: list[Path]) -> tuple[list[str], list[str]]:
@@ -342,7 +307,6 @@ def generate_phase2_figures(config: Phase2VisualizationConfig) -> list[Path]:
                 date_col=date_col,
             ),
         ),
-        ("violation density", lambda: plot_violation_density(prepared, config.output_dir)),
     ]:
         try:
             output_path = plot_func()

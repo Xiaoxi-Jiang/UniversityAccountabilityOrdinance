@@ -131,13 +131,21 @@ def write_checkin_summary(
     )
     if student_corr is not None and not student_corr.empty:
         student_row = student_corr.iloc[0]
+        relationship_x_metric = student_row.get(
+            "relationship_x_metric_label",
+            student_row.get("student_metric_column", "student_housing_metric"),
+        )
+        relationship_corr = student_row.get(
+            "pearson_corr_relationship_metrics",
+            student_row.get("pearson_corr_violations_per_property", float("nan")),
+        )
         lines.append(
             "- Matched ZIP summary: "
             f"{int(student_row['matched_zip_count'])} ZIP codes with student metric "
             f"`{student_row['student_metric_column']}`; "
             f"correlation with total violations = {float(student_row['pearson_corr_total_violations']):.4f}, "
-            "correlation with violations per property = "
-            f"{float(student_row['pearson_corr_violations_per_property']):.4f}."
+            f"correlation between `{relationship_x_metric}` and violation intensity = "
+            f"{float(relationship_corr):.4f}."
         )
     else:
         lines.append(

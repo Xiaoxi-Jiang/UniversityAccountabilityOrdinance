@@ -73,57 +73,153 @@ def _save_barh_figure(
     return save_figure(output_path)
 
 
+def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    numerator_values = pd.to_numeric(numerator, errors="coerce")
+    denominator_values = pd.to_numeric(denominator, errors="coerce").replace(0, np.nan)
+    return numerator_values / denominator_values
+
+
+def _student_relationship_axes(df: pd.DataFrame) -> tuple[str, str, str, str]:
+    y_col = "violations_per_property" if "violations_per_property" in df.columns else "total_violations"
+    y_label = "Violations per Property" if y_col == "violations_per_property" else "Total Violations"
+    x_col = "students_per_property" if "students_per_property" in df.columns else "student_housing_metric"
+    x_label = "Students per Property" if x_col == "students_per_property" else "All Students"
+    return x_col, y_col, x_label, y_label
+
+
 def _save_student_housing_relationship_figure(
     df: pd.DataFrame,
     *,
     zip_col: str,
-    metric_label: str,
     output_path: Path,
 ) -> Path:
-    y_col = "violations_per_property" if "violations_per_property" in df.columns else "total_violations"
-    y_label = "Violations per Property" if y_col == "violations_per_property" else "Total Violations"
+    x_col, y_col, x_label, y_label = _student_relationship_axes(df)
 
-    plot_df = df.dropna(subset=["student_housing_metric", y_col]).copy()
+    plot_df = df.dropna(subset=[x_col, y_col]).copy()
     if plot_df.empty:
         raise ValueError("No matched ZIP rows are available for student housing relationship plotting.")
 
-    if "property_count" in plot_df.columns:
-        point_sizes = plot_df["property_count"].fillna(0).clip(lower=1).astype(float) * 6
-    else:
-        point_sizes = pd.Series(60.0, index=plot_df.index)
-
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.scatter(
-        plot_df["student_housing_metric"],
+        plot_df[x_col],
         plot_df[y_col],
-        s=point_sizes,
-        alpha=0.75,
+        s=70,
+        alpha=0.8,
+        color="#1f77b4",
+        edgecolors="white",
+        linewidths=0.8,
     )
-    if plot_df["student_housing_metric"].nunique() >= 2:
-        x_values = plot_df["student_housing_metric"].astype(float).to_numpy()
+    if plot_df[x_col].nunique() >= 2:
+        x_values = plot_df[x_col].astype(float).to_numpy()
         y_values = plot_df[y_col].astype(float).to_numpy()
         slope, intercept = np.polyfit(x_values, y_values, 1)
         x_line = np.linspace(x_values.min(), x_values.max(), 100)
         ax.plot(x_line, slope * x_line + intercept, linestyle="--", linewidth=1.5)
-
-    label_candidates = pd.concat(
-        [
-            plot_df.nlargest(min(5, len(plot_df)), "student_housing_metric"),
-            plot_df.nlargest(min(5, len(plot_df)), y_col),
-        ]
-    ).drop_duplicates(subset=[zip_col])
-    for _, row in label_candidates.iterrows():
+    centered_x = plot_df[x_col].astype(float) - float(plot_df[x_col].astype(float).mean())
+    centered_y = plot_df[y_col].astype(float) - float(plot_df[y_col].astype(float).mean())
+    std_x = float(plot_df[x_col].astype(float).std(ddof=0) or 0.0)
+    std_y = float(plot_df[y_col].astype(float).std(ddof=0) or 0.0)
+    outlier_score = (
+        centered_x.abs() / (std_x if std_x else 1.0)
+        + centered_y.abs() / (std_y if std_y else 1.0)
+    )
+    plot_df = plot_df.assign(outlier_score=outlier_score)
+    label_df = plot_df.nlargest(min(6, len(plot_df)), "outlier_score")
+    for idx, (_, row) in enumerate(label_df.iterrows()):
+        x_offset = 4 if idx % 2 == 0 else -18
+        y_offset = 4 if idx % 3 else -10
         ax.annotate(
             str(row[zip_col]),
-            (row["student_housing_metric"], row[y_col]),
+            (row[x_col], row[y_col]),
             textcoords="offset points",
-            xytext=(4, 4),
+            xytext=(x_offset, y_offset),
             fontsize=8,
         )
 
-    ax.set_title("Student Housing Concentration vs Violation Intensity by ZIP")
-    ax.set_xlabel(metric_label)
+    corr = _safe_corr(plot_df[x_col], plot_df[y_col])
+    ax.text(
+        0.02,
+        0.98,
+        f"n={len(plot_df)}\nPearson r={corr:.3f}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9,
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85, "edgecolor": "#cbd5e1"},
+    )
+
+    ax.set_title("Student Density vs Violation Intensity by ZIP")
+    ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    ax.grid(alpha=0.25)
+    return save_figure(output_path)
+
+
+def _save_student_housing_ranked_bar_figure(
+    df: pd.DataFrame,
+    *,
+    zip_col: str,
+    output_path: Path,
+) -> Path:
+    _, y_col, _, _ = _student_relationship_axes(df)
+    x_label = "Violations per Property" if y_col == "violations_per_property" else "Total Violations"
+
+    plot_df = (
+        df.dropna(subset=[zip_col, y_col])
+        .sort_values(y_col, ascending=False)
+        .head(10)
+        .copy()
+    )
+    if plot_df.empty:
+        raise ValueError("No matched ZIP rows are available for ranked student housing plotting.")
+
+    plot_df = plot_df.sort_values(y_col, ascending=True)
+    if "property_count" in plot_df.columns:
+        labels = (
+            plot_df[zip_col].astype("string")
+            + " (n="
+            + plot_df["property_count"].fillna(0).astype(int).astype("string")
+            + ")"
+        )
+    else:
+        labels = plot_df[zip_col].astype("string")
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.barh(truncate_labels(labels, width=22), plot_df[y_col], color="#2563eb")
+    ax.set_title("Highest ZIP Violation Intensity With Student Housing Context")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("ZIP Code")
+    ax.grid(axis="x", alpha=0.2)
+    ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=8)
+    return save_figure(output_path)
+
+
+def _save_property_class_rate_figure(
+    df: pd.DataFrame,
+    *,
+    property_class_col: str,
+    output_path: Path,
+) -> Path:
+    plot_df = df.copy()
+    plot_df["class_label"] = (
+        plot_df[property_class_col].astype("string")
+        + " (n="
+        + plot_df["property_count"].fillna(0).astype(int).astype("string")
+        + ")"
+    )
+    plot_df = plot_df.sort_values("violations_per_property", ascending=True)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.barh(
+        truncate_labels(plot_df["class_label"], width=34),
+        plot_df["violations_per_property"],
+        color="#2563eb",
+    )
+    ax.set_title("Violations per Property by Class (Classes With >=25 Properties)")
+    ax.set_xlabel("Violations per Property")
+    ax.set_ylabel("Property Class")
+    ax.grid(axis="x", alpha=0.2)
+    ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=8)
     return save_figure(output_path)
 
 
@@ -287,22 +383,26 @@ def generate_property_risk_outputs(
                 open_violations=("open_violations", "sum"),
             )
             .reset_index()
-            .sort_values("total_violations", ascending=False)
-            .head(15)
         )
+        class_summary["violations_per_property"] = _safe_ratio(
+            class_summary["total_violations"],
+            class_summary["property_count"],
+        )
+        class_summary["open_violations_per_property"] = _safe_ratio(
+            class_summary["open_violations"],
+            class_summary["property_count"],
+        )
+        class_summary = class_summary.loc[class_summary["property_count"] >= 25].copy()
+        class_summary = class_summary.sort_values("violations_per_property", ascending=False).head(15)
         if not class_summary.empty:
             table_paths.append(
                 _write_table(class_summary, tables_dir / "violations_by_property_class.csv")
             )
-            plot_df = class_summary.sort_values("total_violations", ascending=True)
             figure_paths.append(
-                _save_barh_figure(
-                    plot_df[property_class_col],
-                    plot_df["total_violations"],
-                    "Violations by Property Class",
-                    "Violation Count",
-                    "Property Class",
-                    figures_dir / "violations_by_property_class.png",
+                _save_property_class_rate_figure(
+                    class_summary,
+                    property_class_col=property_class_col,
+                    output_path=figures_dir / "violations_by_property_class.png",
                 )
             )
 
@@ -404,30 +504,42 @@ def generate_student_housing_outputs(
             return table_paths, figure_paths
 
         if "property_count" in summary.columns:
-            summary["violations_per_property"] = (
-                summary["total_violations"] / summary["property_count"].replace(0, pd.NA)
+            summary["violations_per_property"] = _safe_ratio(
+                summary["total_violations"],
+                summary["property_count"],
+            )
+            summary["students_per_property"] = _safe_ratio(
+                summary["student_housing_metric"],
+                summary["property_count"],
             )
         if "open_violations" in summary.columns:
-            summary["open_violation_share"] = (
-                summary["open_violations"] / summary["total_violations"].replace(0, pd.NA)
+            summary["open_violation_share"] = _safe_ratio(
+                summary["open_violations"],
+                summary["total_violations"],
             )
-        summary["violations_per_1000_students"] = (
-            summary["total_violations"] / summary["student_housing_metric"].replace(0, pd.NA) * 1000
-        )
+        summary["violations_per_1000_students"] = _safe_ratio(
+            summary["total_violations"],
+            summary["student_housing_metric"],
+        ) * 1000
 
-        table_summary = summary.sort_values("student_housing_metric", ascending=False).head(15)
-        table_paths.append(
-            _write_table(table_summary, tables_dir / "student_housing_zip_context.csv")
-        )
         matched_summary = summary.loc[
             summary["student_housing_metric"].notna() & summary["student_housing_metric"].gt(0)
         ].copy()
+        ranking_col = "violations_per_property" if "violations_per_property" in summary.columns else "total_violations"
+        table_source = matched_summary if not matched_summary.empty else summary
+        table_summary = table_source.sort_values(ranking_col, ascending=False).head(15)
+        table_paths.append(
+            _write_table(table_summary, tables_dir / "student_housing_zip_context.csv")
+        )
         if not matched_summary.empty:
+            relationship_x_col, relationship_y_col, relationship_x_label, _ = _student_relationship_axes(matched_summary)
             correlation_summary = pd.DataFrame(
                 [
                     {
                         "matched_zip_count": int(len(matched_summary)),
                         "student_metric_column": student_metric_col,
+                        "relationship_x_metric_column": relationship_x_col,
+                        "relationship_x_metric_label": relationship_x_label,
                         "pearson_corr_total_violations": round(
                             _safe_corr(
                                 matched_summary["student_housing_metric"],
@@ -444,6 +556,13 @@ def generate_student_housing_outputs(
                         )
                         if "violations_per_property" in matched_summary.columns
                         else np.nan,
+                        "pearson_corr_relationship_metrics": round(
+                            _safe_corr(
+                                matched_summary[relationship_x_col],
+                                matched_summary[relationship_y_col],
+                            ),
+                            4,
+                        ),
                         "median_violations_per_1000_students": round(
                             float(matched_summary["violations_per_1000_students"].median()),
                             4,
@@ -467,19 +586,32 @@ def generate_student_housing_outputs(
                 _save_student_housing_relationship_figure(
                     matched_summary,
                     zip_col=zip_col,
-                    metric_label=student_metric_col.replace("_", " ").title(),
                     output_path=figures_dir / "student_housing_relationship.png",
                 )
             )
+            figure_paths.append(
+                _save_student_housing_ranked_bar_figure(
+                    matched_summary,
+                    zip_col=zip_col,
+                    output_path=figures_dir / "student_housing_violation_intensity_by_zip.png",
+                )
+            )
         try:
+            label_zip_codes = (
+                table_source.sort_values(ranking_col, ascending=False)[zip_col]
+                .head(5)
+                .astype("string")
+                .tolist()
+            )
             figure_paths.append(
                 plot_zip_level_choropleth(
-                    summary,
+                    table_source,
                     zip_col=zip_col,
-                    value_col="total_violations",
+                    value_col=ranking_col,
                     output_path=figures_dir / "student_housing_zip_context.png",
-                    title="Boston ZIP Violation Counts (Student Housing Context Available)",
-                    legend_label="Violation Count",
+                    title="Boston ZIP Violation Intensity (Student Housing Context Available)",
+                    legend_label="Violations per Property" if ranking_col == "violations_per_property" else "Violation Count",
+                    label_zip_codes=label_zip_codes,
                 )
             )
         except Exception as exc:

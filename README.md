@@ -45,7 +45,7 @@ Collection method:
 
 ### Phase 2: Feature Extraction + EDA (Mar 25 - Apr 14)
 - Engineer property and temporal features.
-- Build preliminary visualizations (district trends, severity distribution, violation density).
+- Build preliminary visualizations (district trends, severity distribution, repeated-property hotspots).
 - Deliverable: feature table v1 and exploratory figures.
 
 ### Phase 3: Modeling + Evaluation (Apr 15 - Apr 24)

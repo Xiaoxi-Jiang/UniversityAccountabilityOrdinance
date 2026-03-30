@@ -63,6 +63,7 @@ def test_plot_zip_level_choropleth_writes_png_from_cached_geojson(tmp_path: Path
         output_path=output_path,
         title="Test ZIP Choropleth",
         legend_label="Violation Count",
+        label_zip_codes=["02134"],
         boundary_cache_path=cache_path,
     )
 
