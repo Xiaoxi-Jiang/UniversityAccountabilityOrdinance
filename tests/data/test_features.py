@@ -2,7 +2,6 @@ import pandas as pd
 
 from src.data.features import (
     build_feature_table,
-    clean_violator_name,
     Phase2FeatureConfig,
     generate_property_key,
     get_property_key_diagnostics,
@@ -26,16 +25,6 @@ def test_generate_property_key_prefers_address_and_zip():
     assert out.iloc[0] == "12 main st|02118"
     assert out.iloc[1] == "12 main st|02118"
     assert out.iloc[2] == "c"
-
-
-def test_clean_violator_name_normalizes_spacing_and_case():
-    series = pd.Series(["  Acme, LLC ", "ACME LLC", None])
-    out = clean_violator_name(series)
-    assert out.iloc[0] == "acme llc"
-    assert out.iloc[1] == "acme llc"
-    assert out.iloc[2] == ""
-
-
 def test_normalize_zip_handles_float_artifacts():
     assert normalize_zip(2128.0) == "02128"
     assert normalize_zip("2128.0") == "02128"

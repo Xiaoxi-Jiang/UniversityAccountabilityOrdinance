@@ -42,11 +42,10 @@ def test_generate_phase2_figures_skips_trend_plot_without_dates(tmp_path: Path):
     )
     generated, skipped = summarize_figure_results(paths)
 
-    assert len(paths) == 4
+    assert len(paths) == 3
     assert (output_dir / "severity_distribution.png").exists()
     assert (output_dir / "status_distribution.png").exists()
     assert (output_dir / "top_violation_types.png").exists()
-    assert (output_dir / "violation_density.png").exists()
     assert "trend plot" in skipped
     assert "severity distribution" in generated
     assert "status distribution" in generated

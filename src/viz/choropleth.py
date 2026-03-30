@@ -84,6 +84,7 @@ def plot_zip_level_choropleth(
     output_path: Path,
     title: str,
     legend_label: str,
+    label_zip_codes: list[str] | None = None,
     boundary_cache_path: Path = BOSTON_ZIP_BOUNDARY_CACHE_PATH,
     boundary_url: str = BOSTON_ZIP_BOUNDARY_URL,
 ) -> Path:
@@ -112,6 +113,11 @@ def plot_zip_level_choropleth(
     patches: list[Polygon] = []
     patch_values: list[float] = []
     label_positions: dict[str, tuple[float, float]] = {}
+    label_zip_set = (
+        {normalize_zip(zip_code) for zip_code in label_zip_codes if normalize_zip(zip_code)}
+        if label_zip_codes
+        else None
+    )
 
     for feature in boundary_geojson["features"]:
         properties = feature.get("properties") or {}
@@ -163,7 +169,22 @@ def plot_zip_level_choropleth(
     colorbar = fig.colorbar(scalar_mappable, ax=ax, shrink=0.72, pad=0.02)
     colorbar.set_label(legend_label)
 
-    if len(label_positions) <= 30:
+    if label_zip_set is not None:
+        for zip_code in label_zip_codes or []:
+            normalized_zip = normalize_zip(zip_code)
+            if normalized_zip not in label_positions:
+                continue
+            x_coord, y_coord = label_positions[normalized_zip]
+            ax.text(
+                x_coord,
+                y_coord,
+                normalized_zip,
+                ha="center",
+                va="center",
+                fontsize=7,
+                color="#111827",
+            )
+    elif len(label_positions) <= 30:
         for zip_code, (x_coord, y_coord) in label_positions.items():
             ax.text(
                 x_coord,
