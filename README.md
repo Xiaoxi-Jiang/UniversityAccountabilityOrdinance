@@ -6,19 +6,19 @@
 - zywang1@bu.edu
 
 ## Project Description
-This project studies off-campus student housing in Boston and builds a reproducible data pipeline to evaluate accountability outcomes across neighborhoods, landlords, and time. We integrate housing, violations, and city service data to understand where students live, housing quality conditions, and compliance patterns.
+This project studies off-campus student housing in Boston and builds a reproducible data pipeline to evaluate accountability outcomes across neighborhoods, properties, and time. We integrate housing, violations, and city service data to understand where students live, housing quality conditions, and compliance patterns.
 
 ## Measurable Project Goals
 1. Estimate student rental concentration by district and year.
-2. Identify high-risk landlord/property patterns using violation severity and frequency features.
+2. Identify high-risk property patterns using violation severity and frequency features.
 3. Build a baseline predictive model for whether a property will receive a new severe violation in the next period.
-4. Produce clear visualizations for district-level trends and landlord risk distributions.
+4. Produce clear visualizations for district-level trends and property risk distributions.
 
 ## Data Sources and Collection Plan
 - Building and Property Violations: Boston Open Data CSV/API
 - Property Assessment: Boston ArcGIS/Analyze Boston
 - Parcels (current/FY25-compatible): Boston ArcGIS parcels service
-- RentSmart: optional local export if available
+- RentSmart: optional local export if available, or fetchable from the public Boston.gov dashboard
 - Student Housing: optional team-provided CSV/XLSX
 - 311 Service Requests: Boston Open Data CSV/API
 - SAM Addresses: Boston Open Data CSV/API
@@ -44,7 +44,7 @@ Collection method:
 - Deliverable: runnable phase-1 pipeline and March check-in materials.
 
 ### Phase 2: Feature Extraction + EDA (Mar 25 - Apr 14)
-- Engineer landlord/property and temporal features.
+- Engineer property and temporal features.
 - Build preliminary visualizations (district trends, severity distribution, violation density).
 - Deliverable: feature table v1 and exploratory figures.
 
@@ -68,13 +68,16 @@ make install
 make prepare-data
 make pipeline
 make baseline-model
+make fetch-rentsmart
 ```
 
 What they do:
 - `make prepare-data`: downloads and cleans the source violations dataset
   and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available
 - `make pipeline`: builds violations features, enriches them with SAM/geocoder, property assessment, parcels, 311, permits, ACS, and optional RentSmart/student-housing context, then generates EDA tables/figures and runs the baseline model
-- `make baseline-model`: reruns only the baseline model from the feature table
+- the pipeline also writes a short narrative check-in summary and direct student-housing relationship outputs when student-housing context is available
+- `make baseline-model`: trains the property-level baseline model from cleaned violations history and saves both metrics and coefficient summaries
+- `make fetch-rentsmart`: downloads the public RentSmart Boston dashboard data into `data/raw/rentsmart.csv`
 
 Generated outputs:
 - `data/processed/violations_clean.csv`
@@ -91,6 +94,11 @@ Generated outputs:
 - summary tables in `outputs/tables/`
 - exploratory figures in `outputs/figures/`
 - baseline model results in `outputs/tables/baseline_model_results.csv`
+- baseline model coefficient directions in `outputs/tables/baseline_model_feature_coefficients.csv`
+- direct student-housing relationship outputs in `outputs/tables/student_housing_relationship.csv`,
+  `outputs/tables/student_housing_correlation_summary.csv`,
+  and `outputs/figures/student_housing_relationship.png`
+- a narrative March check-in summary in `outputs/checkin_summary.md`
 
 Optional outputs:
 - `data/processed/student_housing_context_v1.csv` if a local student housing file is available
@@ -103,6 +111,7 @@ make install
 make prepare-data
 make pipeline
 make baseline-model
+make fetch-rentsmart
 make test
 ```
 
@@ -166,7 +175,7 @@ Optional data notes:
 - Building permits are configured against Boston's public ArcGIS permits service and cached to `data/raw/` when available.
 - ACS ZIP context is pulled from the Census ACS 5-year API when a local extract is not present.
 - 311 service requests are pulled automatically from Boston Open Data's `311 Service Requests` CKAN package when a local `data/raw/service_requests_311.csv` file is not present. The loader combines the current-year CSV, previous-year CSV, and the `NEW SYSTEM` CSV when available.
-- RentSmart is treated as optional because a stable bulk machine-readable source may not always be available.
+- RentSmart is treated as optional because the project can run without it, but a public dashboard export path is now available from [Boston.gov](https://www.boston.gov/departments/analytics-team/rentsmart-boston).
 - Student housing uses a local file when present. If not, the pipeline falls back to a bundled ZIP-level summary derived from the official `Boston Student Housing Report` so the student-context layer can still run in summary form.
 - Expected local raw file names include:
   `data/raw/sam_addresses.csv`,
@@ -176,6 +185,7 @@ Optional data notes:
   `data/raw/student_housing.xlsx`, `data/raw/student_housing.csv`,
   `data/raw/uar_fall_2022.xlsx`, `data/raw/uar_fall_2023.xlsx`,
   and optionally `data/raw/rentsmart.csv` / `data/raw/rentsmart.xlsx` / `data/raw/rentsmart.geojson`.
+- To fetch the public RentSmart extract directly, run `make fetch-rentsmart`.
 - Student housing integration expects one of those local files. If missing, the pipeline logs the limitation and skips that layer.
 - A bundled fallback summary is stored at `data/reference/student_housing_zip_2023.csv`.
 - Property-risk enrichment now prefers SAM-normalized identifier joins before falling back to address+ZIP matches.

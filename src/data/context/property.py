@@ -289,6 +289,15 @@ def clean_rentsmart(df: pd.DataFrame) -> pd.DataFrame:
     cleaned = df.copy()
     cleaned.columns = _standardize_columns(cleaned.columns.tolist())
 
+    if "parcel" in cleaned.columns and "map_par_id" not in cleaned.columns:
+        cleaned["map_par_id"] = cleaned["parcel"]
+    if "date" in cleaned.columns and "violation_date" not in cleaned.columns:
+        cleaned["violation_date"] = cleaned["date"]
+    if "type" in cleaned.columns and "violation_type" not in cleaned.columns:
+        cleaned["violation_type"] = cleaned["type"]
+    if "description" in cleaned.columns and "violation_description" not in cleaned.columns:
+        cleaned["violation_description"] = cleaned["description"]
+
     owner_like = [column for column in cleaned.columns if "owner" in column or "landlord" in column]
     for column in owner_like:
         cleaned[f"{column}_clean"] = cleaned[column].map(normalize_owner_text).astype("string")

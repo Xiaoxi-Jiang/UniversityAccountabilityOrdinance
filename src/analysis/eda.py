@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import numpy as np
 import pandas as pd
 
 from src.data.features import (
     Phase2FeatureConfig,
     VIOLATION_TYPE_CANDIDATES,
-    clean_violator_name,
     first_available_column,
     load_phase2_source_data,
     normalize_zip,
@@ -71,6 +71,69 @@ def _save_barh_figure(
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     return save_figure(output_path)
+
+
+def _save_student_housing_relationship_figure(
+    df: pd.DataFrame,
+    *,
+    zip_col: str,
+    metric_label: str,
+    output_path: Path,
+) -> Path:
+    y_col = "violations_per_property" if "violations_per_property" in df.columns else "total_violations"
+    y_label = "Violations per Property" if y_col == "violations_per_property" else "Total Violations"
+
+    plot_df = df.dropna(subset=["student_housing_metric", y_col]).copy()
+    if plot_df.empty:
+        raise ValueError("No matched ZIP rows are available for student housing relationship plotting.")
+
+    if "property_count" in plot_df.columns:
+        point_sizes = plot_df["property_count"].fillna(0).clip(lower=1).astype(float) * 6
+    else:
+        point_sizes = pd.Series(60.0, index=plot_df.index)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.scatter(
+        plot_df["student_housing_metric"],
+        plot_df[y_col],
+        s=point_sizes,
+        alpha=0.75,
+    )
+    if plot_df["student_housing_metric"].nunique() >= 2:
+        x_values = plot_df["student_housing_metric"].astype(float).to_numpy()
+        y_values = plot_df[y_col].astype(float).to_numpy()
+        slope, intercept = np.polyfit(x_values, y_values, 1)
+        x_line = np.linspace(x_values.min(), x_values.max(), 100)
+        ax.plot(x_line, slope * x_line + intercept, linestyle="--", linewidth=1.5)
+
+    label_candidates = pd.concat(
+        [
+            plot_df.nlargest(min(5, len(plot_df)), "student_housing_metric"),
+            plot_df.nlargest(min(5, len(plot_df)), y_col),
+        ]
+    ).drop_duplicates(subset=[zip_col])
+    for _, row in label_candidates.iterrows():
+        ax.annotate(
+            str(row[zip_col]),
+            (row["student_housing_metric"], row[y_col]),
+            textcoords="offset points",
+            xytext=(4, 4),
+            fontsize=8,
+        )
+
+    ax.set_title("Student Housing Concentration vs Violation Intensity by ZIP")
+    ax.set_xlabel(metric_label)
+    ax.set_ylabel(y_label)
+    return save_figure(output_path)
+
+
+def _safe_corr(left: pd.Series, right: pd.Series | None) -> float:
+    if right is None:
+        return float("nan")
+    aligned = pd.concat([left, right], axis=1).dropna()
+    if aligned.empty or aligned.iloc[:, 0].nunique() < 2 or aligned.iloc[:, 1].nunique() < 2:
+        return float("nan")
+    return float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]))
 
 
 def _series_count_table(series: pd.Series, index_name: str, *, sort_index: bool = False) -> pd.DataFrame:
@@ -145,19 +208,6 @@ def generate_eda_tables(config: Phase2EDASummaryConfig) -> list[Path]:
         output_paths.append(
             _write_table(top_violation_types, config.output_dir / "top_violation_types.csv")
         )
-
-    if "violator_name" in prepared.columns:
-        top_violators = (
-            clean_violator_name(prepared["violator_name"])
-            .replace("", pd.NA)
-            .dropna()
-            .value_counts()
-            .head(20)
-            .rename_axis("violator_name_clean")
-            .reset_index(name="count")
-        )
-        if not top_violators.empty:
-            output_paths.append(_write_table(top_violators, config.output_dir / "top_violators.csv"))
 
     return output_paths
 
@@ -312,33 +362,115 @@ def generate_student_housing_outputs(
     figure_paths: list[Path] = []
 
     zip_col = next((column for column in ["zip", "zip_code", "postal_code"] if column in context_df.columns), None)
+    preferred_student_metric_cols = [
+        "all_students",
+        "student_housing_metric",
+        "total_students",
+        "student_beds",
+        "beds",
+        "student_units",
+    ]
     student_metric_col = next(
         (
             column
-            for column in context_df.columns
-            if any(token in column for token in ["student", "bed", "unit", "occup"])
-            and pd.api.types.is_numeric_dtype(context_df[column])
+            for column in preferred_student_metric_cols
+            if column in context_df.columns and pd.api.types.is_numeric_dtype(context_df[column])
         ),
         None,
     )
-    if zip_col is not None and student_metric_col is not None and "total_violations" in context_df.columns:
-        summary = (
-            context_df.groupby(zip_col)
-            .agg(
-                total_violations=("total_violations", "sum"),
-                student_housing_metric=(student_metric_col, "sum"),
-            )
-            .reset_index()
+    if student_metric_col is None:
+        student_metric_col = next(
+            (
+                column
+                for column in context_df.columns
+                if any(token in column for token in ["student", "bed", "unit", "occup"])
+                and pd.api.types.is_numeric_dtype(context_df[column])
+            ),
+            None,
         )
+    if zip_col is not None and student_metric_col is not None and "total_violations" in context_df.columns:
+        aggregation = {
+            "total_violations": ("total_violations", "sum"),
+            "student_housing_metric": (student_metric_col, "sum"),
+        }
+        if "open_violations" in context_df.columns:
+            aggregation["open_violations"] = ("open_violations", "sum")
+        if "property_count" in context_df.columns:
+            aggregation["property_count"] = ("property_count", "sum")
+        summary = context_df.groupby(zip_col).agg(**aggregation).reset_index()
         summary[zip_col] = summary[zip_col].map(normalize_zip).astype("string")
         summary = summary.dropna(subset=[zip_col])
         if summary.empty:
             return table_paths, figure_paths
 
+        if "property_count" in summary.columns:
+            summary["violations_per_property"] = (
+                summary["total_violations"] / summary["property_count"].replace(0, pd.NA)
+            )
+        if "open_violations" in summary.columns:
+            summary["open_violation_share"] = (
+                summary["open_violations"] / summary["total_violations"].replace(0, pd.NA)
+            )
+        summary["violations_per_1000_students"] = (
+            summary["total_violations"] / summary["student_housing_metric"].replace(0, pd.NA) * 1000
+        )
+
         table_summary = summary.sort_values("student_housing_metric", ascending=False).head(15)
         table_paths.append(
             _write_table(table_summary, tables_dir / "student_housing_zip_context.csv")
         )
+        matched_summary = summary.loc[
+            summary["student_housing_metric"].notna() & summary["student_housing_metric"].gt(0)
+        ].copy()
+        if not matched_summary.empty:
+            correlation_summary = pd.DataFrame(
+                [
+                    {
+                        "matched_zip_count": int(len(matched_summary)),
+                        "student_metric_column": student_metric_col,
+                        "pearson_corr_total_violations": round(
+                            _safe_corr(
+                                matched_summary["student_housing_metric"],
+                                matched_summary["total_violations"],
+                            ),
+                            4,
+                        ),
+                        "pearson_corr_violations_per_property": round(
+                            _safe_corr(
+                                matched_summary["student_housing_metric"],
+                                matched_summary.get("violations_per_property"),
+                            ),
+                            4,
+                        )
+                        if "violations_per_property" in matched_summary.columns
+                        else np.nan,
+                        "median_violations_per_1000_students": round(
+                            float(matched_summary["violations_per_1000_students"].median()),
+                            4,
+                        ),
+                    }
+                ]
+            )
+            table_paths.append(
+                _write_table(
+                    matched_summary.sort_values("student_housing_metric", ascending=False),
+                    tables_dir / "student_housing_relationship.csv",
+                )
+            )
+            table_paths.append(
+                _write_table(
+                    correlation_summary,
+                    tables_dir / "student_housing_correlation_summary.csv",
+                )
+            )
+            figure_paths.append(
+                _save_student_housing_relationship_figure(
+                    matched_summary,
+                    zip_col=zip_col,
+                    metric_label=student_metric_col.replace("_", " ").title(),
+                    output_path=figures_dir / "student_housing_relationship.png",
+                )
+            )
         try:
             figure_paths.append(
                 plot_zip_level_choropleth(
@@ -346,7 +478,7 @@ def generate_student_housing_outputs(
                     zip_col=zip_col,
                     value_col="total_violations",
                     output_path=figures_dir / "student_housing_zip_context.png",
-                    title="Boston ZIP Violations With Student Housing Context",
+                    title="Boston ZIP Violation Counts (Student Housing Context Available)",
                     legend_label="Violation Count",
                 )
             )

@@ -28,8 +28,6 @@ DEFAULT_RAW_PATH = Path("data/raw/violations.csv")
 DATE_COLUMN_CANDIDATES = ["violdttm", "violation_date", "status_dttm", "date"]
 STATUS_COLUMN_CANDIDATES = ["status"]
 VIOLATION_TYPE_CANDIDATES = ["violationtype", "violationtype_descr", "description"]
-VIOLATOR_COLUMN_CANDIDATES = ["violator_name"]
-
 RAW_SUPPLEMENT_COLUMNS = [
     "case_no",
     "status_dttm",
@@ -104,11 +102,6 @@ def normalize_zip(value: object) -> str:
     if not digits:
         return ""
     return digits[:5].zfill(5)
-
-
-def clean_violator_name(series: pd.Series) -> pd.Series:
-    """Create a normalized violator name series."""
-    return series.map(normalize_string).astype("string")
 
 
 def coerce_datetime_column(df: pd.DataFrame, candidates: Iterable[str]) -> str | None:
@@ -254,14 +247,6 @@ def _recent_violation_count(
     return int(dates.ge(window_start).sum())
 
 
-def landlord_features_available(df: pd.DataFrame) -> bool:
-    """Return whether landlord/violator features are actually available."""
-    if "violator_name_clean" not in df.columns:
-        return False
-    values = df["violator_name_clean"].astype("string").fillna("")
-    return bool(values.str.len().gt(0).any())
-
-
 def _aligned_group_values(
     grouped: pd.core.groupby.DataFrameGroupBy,
     property_keys: pd.Series,
@@ -303,19 +288,10 @@ def prepare_violations_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, str | None
     """Add normalized columns used by downstream Phase 2 steps."""
     prepared = df.copy()
     date_col = coerce_datetime_column(prepared, DATE_COLUMN_CANDIDATES)
-    violator_col = first_available_column(prepared, VIOLATOR_COLUMN_CANDIDATES)
 
     property_key, property_key_source = generate_property_key_components(prepared)
     prepared.loc[:, "property_key"] = property_key
     prepared.loc[:, "property_key_source"] = property_key_source
-    if violator_col is not None:
-        prepared.loc[:, "violator_name_clean"] = clean_violator_name(prepared[violator_col])
-    else:
-        prepared.loc[:, "violator_name_clean"] = pd.Series(
-            pd.NA,
-            index=prepared.index,
-            dtype="string",
-        )
 
     if "violation_zip" in prepared.columns:
         prepared["violation_zip"] = prepared["violation_zip"].map(normalize_zip).astype("string")
@@ -428,25 +404,6 @@ def build_feature_table(df: pd.DataFrame) -> pd.DataFrame:
             dtype="string",
         )
 
-    if "violator_name_clean" in prepared.columns:
-        _assign_grouped_column(
-            feature_table,
-            grouped,
-            "violator_name_clean",
-            "violator_name_clean",
-            _top_non_empty,
-            dtype="string",
-        )
-        _assign_grouped_column(
-            feature_table,
-            grouped,
-            "violator_name_clean",
-            "distinct_violators",
-            lambda values: values.nunique(dropna=True),
-            fill_value=0,
-            dtype=int,
-        )
-
     if date_col is not None:
         first_violation = grouped[date_col].min()
         last_violation = grouped[date_col].max()
@@ -486,15 +443,12 @@ def build_feature_table(df: pd.DataFrame) -> pd.DataFrame:
 def print_feature_summary(
     df: pd.DataFrame,
     property_key_diagnostics: dict[str, Any] | None = None,
-    landlord_available: bool | None = None,
 ) -> None:
     """Print a short summary of the generated feature table."""
     summary_lines = [
         f"Feature table rows: {len(df)}",
         f"Feature table columns: {len(df.columns)}",
     ]
-    if landlord_available is not None:
-        summary_lines.append(f"Landlord/violator features available: {landlord_available}")
     if property_key_diagnostics is not None:
         summary_lines.extend(
             [
@@ -525,7 +479,6 @@ def run_phase2_feature_engineering(config: Phase2FeatureConfig) -> Path:
     source_df = load_phase2_source_data(config)
     prepared, _ = prepare_violations_frame(source_df)
     diagnostics = get_property_key_diagnostics(prepared)
-    landlord_available = landlord_features_available(prepared)
     feature_table = build_feature_table(source_df)
 
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -533,10 +486,7 @@ def run_phase2_feature_engineering(config: Phase2FeatureConfig) -> Path:
     print_feature_summary(
         feature_table,
         property_key_diagnostics=diagnostics,
-        landlord_available=landlord_available,
     )
-    if not landlord_available:
-        print("Landlord features unavailable: no usable violator_name field exists in the current dataset.")
     print(f"Feature table saved to: {config.output_path}")
     return config.output_path
 
