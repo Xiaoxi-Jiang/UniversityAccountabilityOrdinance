@@ -40,6 +40,10 @@ class PermitContextConfig:
     )
     permits_url: str | None = PERMITS_URL
     clean_output_path: Path = Path("data/processed/building_permits_clean.csv")
+    download_timeout: int = 60
+    download_chunk_size: int = 1000
+    download_workers: int = 4
+    download_max_attempts: int = 3
 
 
 def _normalize_identifier(value: object) -> str:
@@ -195,7 +199,15 @@ def load_permits(config: PermitContextConfig) -> pd.DataFrame | None:
             save_clean_output(cleaned_existing, config.clean_output_path)
             return cleaned_existing
         fallback_path = config.raw_dir / config.candidates[0]
-        downloaded = download_arcgis_layer(config.permits_url, fallback_path)
+        downloaded = download_arcgis_layer(
+            config.permits_url,
+            fallback_path,
+            timeout=config.download_timeout,
+            use_object_id_chunks=True,
+            chunk_size=config.download_chunk_size,
+            max_workers=config.download_workers,
+            max_attempts=config.download_max_attempts,
+        )
         raw_path = downloaded or (fallback_path if fallback_path.exists() else None)
     if raw_path is None:
         print("Building permit data unavailable: no local extract or public endpoint response was found.")
