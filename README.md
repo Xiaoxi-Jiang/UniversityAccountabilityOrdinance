@@ -72,14 +72,18 @@ make baseline-model
 
 What they do:
 - `make prepare-data`: downloads and cleans the source violations dataset
-  and preloads optional property/student-housing source tables into cleaned Phase 1 outputs when local files or public endpoints are available
-- `make pipeline`: builds violations features, attempts property-layer enrichment, optionally integrates student housing context, generates EDA tables/figures, and runs the baseline model
+  and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available
+- `make pipeline`: builds violations features, enriches them with SAM/geocoder, property assessment, parcels, 311, permits, ACS, and optional RentSmart/student-housing context, then generates EDA tables/figures and runs the baseline model
 - `make baseline-model`: reruns only the baseline model from the feature table
 
 Generated outputs:
 - `data/processed/violations_clean.csv`
+- `data/processed/sam_addresses_clean.csv` when SAM/geocoder data is available
 - `data/processed/property_assessment_clean.csv` when Property Assessment data is available
 - `data/processed/parcels_clean.csv` when Parcels data is available
+- `data/processed/service_requests_311_clean.csv` when 311 data is available
+- `data/processed/building_permits_clean.csv` when permit data is available
+- `data/processed/acs_context_clean.csv` when ACS ZIP context is available
 - `data/processed/rentsmart_clean.csv` when RentSmart data is available
 - `data/processed/student_housing_clean.csv` when a local student housing file is available
 - `data/processed/violations_feature_table_v1.csv`
@@ -142,7 +146,12 @@ Structure notes:
 - `src/data/violations.py`: Phase 1 violations download and cleaning
 - `src/data/features.py`: Phase 2 feature engineering over cleaned violations
 - `src/data/context/`: optional enrichment layers used after the core violations flow
-- `src/data/context/property.py`: optional property assessment / parcels / RentSmart integration
+- `src/data/context/common.py`: shared loaders and normalized address-key helpers
+- `src/data/context/address.py`: SAM/geocoder address normalization and parcel crosswalks
+- `src/data/context/property.py`: property assessment / parcels / RentSmart integration
+- `src/data/context/service_requests.py`: 311 cleaning and aggregation
+- `src/data/context/permits.py`: permit cleaning and aggregation
+- `src/data/context/acs.py`: ZIP-level ACS context
 - `src/data/context/student_housing.py`: optional student housing loader and context joins
 - `src/analysis/`: EDA and reporting entrypoints
 - `src/modeling/`: baseline modeling code
@@ -153,13 +162,23 @@ Structure notes:
 - `reports/`: presentation-ready assets for final deliverables
 
 Optional data notes:
-- Property Assessment and Parcels are configured with official Boston ArcGIS service endpoints and are cached to `data/raw/` when available.
+- SAM, Property Assessment, and Parcels are configured with official Boston ArcGIS service endpoints and are cached to `data/raw/` when available.
+- Building permits are configured against Boston's public ArcGIS permits service and cached to `data/raw/` when available.
+- ACS ZIP context is pulled from the Census ACS 5-year API when a local extract is not present.
+- 311 service requests are pulled automatically from Boston Open Data's `311 Service Requests` CKAN package when a local `data/raw/service_requests_311.csv` file is not present. The loader combines the current-year CSV, previous-year CSV, and the `NEW SYSTEM` CSV when available.
 - RentSmart is treated as optional because a stable bulk machine-readable source may not always be available.
+- Student housing uses a local file when present. If not, the pipeline falls back to a bundled ZIP-level summary derived from the official `Boston Student Housing Report` so the student-context layer can still run in summary form.
 - Expected local raw file names include:
+  `data/raw/sam_addresses.csv`,
+  `data/raw/service_requests_311.csv`,
+  `data/raw/building_permits.csv`,
+  `data/raw/acs_context.csv`,
   `data/raw/student_housing.xlsx`, `data/raw/student_housing.csv`,
   `data/raw/uar_fall_2022.xlsx`, `data/raw/uar_fall_2023.xlsx`,
   and optionally `data/raw/rentsmart.csv` / `data/raw/rentsmart.xlsx` / `data/raw/rentsmart.geojson`.
 - Student housing integration expects one of those local files. If missing, the pipeline logs the limitation and skips that layer.
+- A bundled fallback summary is stored at `data/reference/student_housing_zip_2023.csv`.
+- Property-risk enrichment now prefers SAM-normalized identifier joins before falling back to address+ZIP matches.
 
 ## Contributing
 1. Create a feature branch.

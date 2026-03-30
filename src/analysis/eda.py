@@ -170,7 +170,7 @@ def generate_property_risk_outputs(
         print("Skipping property-risk EDA: property risk table is unavailable.")
         return [], []
 
-    risk_df = pd.read_csv(property_risk_path)
+    risk_df = pd.read_csv(property_risk_path, low_memory=False)
     table_paths: list[Path] = []
     figure_paths: list[Path] = []
 
@@ -305,7 +305,7 @@ def generate_student_housing_outputs(
         print("Skipping student housing EDA: student housing context is unavailable.")
         return [], []
 
-    context_df = pd.read_csv(student_context_path)
+    context_df = pd.read_csv(student_context_path, low_memory=False)
     table_paths: list[Path] = []
     figure_paths: list[Path] = []
 

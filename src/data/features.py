@@ -97,7 +97,10 @@ def normalize_zip(value: object) -> str:
     if value is None or pd.isna(value):
         return ""
 
-    digits = re.sub(r"\D+", "", str(value))
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    digits = re.sub(r"\D+", "", text)
     if not digits:
         return ""
     return digits[:5].zfill(5)
