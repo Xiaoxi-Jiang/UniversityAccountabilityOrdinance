@@ -68,13 +68,21 @@ def _print_pipeline_summary(
         "Address-based property keys (%): "
         f"{property_key_diagnostics['address_based_key_pct']:.1f}",
         "Property datasets loaded: "
+        f"sam={property_risk_diagnostics.get('sam_loaded')}, "
         f"assessment={property_risk_diagnostics.get('property_assessment_loaded')}, "
         f"parcels={property_risk_diagnostics.get('parcels_loaded')}, "
-        f"rentsmart={property_risk_diagnostics.get('rentsmart_loaded')}",
+        f"rentsmart={property_risk_diagnostics.get('rentsmart_loaded')}, "
+        f"service_requests={property_risk_diagnostics.get('service_requests_loaded')}, "
+        f"permits={property_risk_diagnostics.get('permits_loaded')}, "
+        f"acs={property_risk_diagnostics.get('acs_loaded')}",
         "Property join diagnostics (%): "
+        f"sam={property_risk_diagnostics.get('sam_match_rate_pct', 0.0)}, "
         f"assessment={property_risk_diagnostics.get('assessment_match_rate_pct', 0.0)}, "
         f"parcels={property_risk_diagnostics.get('parcel_match_rate_pct', 0.0)}, "
-        f"rentsmart={property_risk_diagnostics.get('rentsmart_match_rate_pct', 0.0)}",
+        f"rentsmart={property_risk_diagnostics.get('rentsmart_match_rate_pct', 0.0)}, "
+        f"service_requests={property_risk_diagnostics.get('service_request_context_rate_pct', 0.0)}, "
+        f"permits={property_risk_diagnostics.get('permit_context_rate_pct', 0.0)}, "
+        f"acs={property_risk_diagnostics.get('acs_context_rate_pct', 0.0)}",
         "Owner / parcel context coverage (%): "
         f"owner_data={property_risk_diagnostics.get('owner_data_rate_pct', 0.0)}, "
         f"parcel_context={property_risk_diagnostics.get('parcel_context_rate_pct', 0.0)}",
@@ -122,7 +130,7 @@ def main() -> None:
         PropertyDataConfig(),
         feature_path,
     )
-    property_risk_df = pd.read_csv(property_risk_path)
+    property_risk_df = pd.read_csv(property_risk_path, low_memory=False)
     student_context_path, student_housing_diagnostics = save_student_housing_context(
         StudentHousingConfig(),
         property_risk_df,

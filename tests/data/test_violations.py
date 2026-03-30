@@ -66,6 +66,51 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
             "POLY_TYPE": ["parcel"],
         }
     )
+    sam_df = pd.DataFrame(
+        {
+            "FULL_ADDRESS": ["12 Main St"],
+            "ZIP_CODE": ["02118"],
+            "MAP_PAR_ID": ["0001"],
+            "LOC_ID": ["L1"],
+            "NEIGHBORHOOD": ["South End"],
+        }
+    )
+    service_requests_df = pd.DataFrame(
+        {
+            "ADDRESS": ["12 Main St"],
+            "ZIP_CODE": ["02118"],
+            "OPEN_DT": ["2024-02-01"],
+            "REASON": ["Unsanitary Conditions"],
+        }
+    )
+    permits_df = pd.DataFrame(
+        {
+            "ADDRESS": ["12 Main St"],
+            "ZIP_CODE": ["02118"],
+            "ISSUE_DATE": ["2023-08-15"],
+            "PERMIT_TYPE": ["Renovation"],
+        }
+    )
+    acs_df = pd.DataFrame(
+        {
+            "ZIP": ["02118"],
+            "median_household_income": [95000],
+            "total_tenure": [1000],
+            "renter_occupied": [700],
+            "total_housing_units": [1100],
+            "vacant_housing_units": [100],
+            "median_gross_rent": [2400],
+            "total_population": [3000],
+            "B01001_007E": [50],
+            "B01001_008E": [40],
+            "B01001_009E": [35],
+            "B01001_010E": [90],
+            "B01001_031E": [45],
+            "B01001_032E": [40],
+            "B01001_033E": [30],
+            "B01001_034E": [85],
+        }
+    )
     student_df = pd.DataFrame(
         {
             "School": ["Boston University"],
@@ -77,6 +122,10 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
 
     property_df.to_csv(raw_dir / "property_assessment_fy25.csv", index=False)
     parcels_df.to_csv(raw_dir / "parcels_current.csv", index=False)
+    sam_df.to_csv(raw_dir / "sam_addresses.csv", index=False)
+    service_requests_df.to_csv(raw_dir / "service_requests_311.csv", index=False)
+    permits_df.to_csv(raw_dir / "building_permits.csv", index=False)
+    acs_df.to_csv(raw_dir / "acs_context.csv", index=False)
     student_df.to_csv(raw_dir / "student_housing.csv", index=False)
 
     def fake_download(_url, output_path, timeout=30):
@@ -95,5 +144,9 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
     assert raw_path.exists()
     assert cleaned_path.exists()
     assert (processed_dir / "property_assessment_clean.csv").exists()
+    assert (processed_dir / "sam_addresses_clean.csv").exists()
     assert (processed_dir / "parcels_clean.csv").exists()
+    assert (processed_dir / "service_requests_311_clean.csv").exists()
+    assert (processed_dir / "building_permits_clean.csv").exists()
+    assert (processed_dir / "acs_context_clean.csv").exists()
     assert (processed_dir / "student_housing_clean.csv").exists()

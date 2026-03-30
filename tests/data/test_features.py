@@ -7,6 +7,7 @@ from src.data.features import (
     generate_property_key,
     get_property_key_diagnostics,
     load_phase2_source_data,
+    normalize_zip,
     prepare_violations_frame,
 )
 
@@ -33,6 +34,11 @@ def test_clean_violator_name_normalizes_spacing_and_case():
     assert out.iloc[0] == "acme llc"
     assert out.iloc[1] == "acme llc"
     assert out.iloc[2] == ""
+
+
+def test_normalize_zip_handles_float_artifacts():
+    assert normalize_zip(2128.0) == "02128"
+    assert normalize_zip("2128.0") == "02128"
 
 
 def test_build_feature_table_handles_missing_status_and_date_columns():

@@ -82,11 +82,18 @@ def clean_violations(df: pd.DataFrame) -> pd.DataFrame:
 
 def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | None]:
     """Preload optional non-violations datasets as cleaned Phase 1 outputs."""
+    from src.data.context.acs import ACSContextConfig, load_acs_context
+    from src.data.context.address import AddressContextConfig, load_sam_addresses
+    from src.data.context.permits import PermitContextConfig, load_permits
     from src.data.context.property import (
         PropertyDataConfig,
         load_parcels,
         load_property_assessment,
         load_rentsmart,
+    )
+    from src.data.context.service_requests import (
+        ServiceRequestConfig,
+        load_service_requests,
     )
     from src.data.context.student_housing import (
         StudentHousingConfig,
@@ -101,6 +108,26 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
         rentsmart_clean_output=config.processed_dir / "rentsmart_clean.csv",
         property_risk_output=config.processed_dir / "property_risk_table_v1.csv",
     )
+    address_config = AddressContextConfig(
+        raw_dir=config.raw_dir,
+        processed_dir=config.processed_dir,
+        sam_clean_output=config.processed_dir / "sam_addresses_clean.csv",
+    )
+    service_request_config = ServiceRequestConfig(
+        raw_dir=config.raw_dir,
+        processed_dir=config.processed_dir,
+        clean_output_path=config.processed_dir / "service_requests_311_clean.csv",
+    )
+    permit_config = PermitContextConfig(
+        raw_dir=config.raw_dir,
+        processed_dir=config.processed_dir,
+        clean_output_path=config.processed_dir / "building_permits_clean.csv",
+    )
+    acs_config = ACSContextConfig(
+        raw_dir=config.raw_dir,
+        processed_dir=config.processed_dir,
+        clean_output_path=config.processed_dir / "acs_context_clean.csv",
+    )
     student_config = StudentHousingConfig(
         raw_dir=config.raw_dir,
         clean_output_path=config.processed_dir / "student_housing_clean.csv",
@@ -114,6 +141,11 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
         if load_property_assessment(property_config) is not None
         else None
     )
+    outputs["sam_addresses_clean"] = (
+        address_config.sam_clean_output
+        if load_sam_addresses(address_config) is not None
+        else None
+    )
     outputs["parcels_clean"] = (
         property_config.parcels_clean_output
         if load_parcels(property_config) is not None
@@ -122,6 +154,21 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
     outputs["rentsmart_clean"] = (
         property_config.rentsmart_clean_output
         if load_rentsmart(property_config) is not None
+        else None
+    )
+    outputs["service_requests_311_clean"] = (
+        service_request_config.clean_output_path
+        if load_service_requests(service_request_config) is not None
+        else None
+    )
+    outputs["building_permits_clean"] = (
+        permit_config.clean_output_path
+        if load_permits(permit_config) is not None
+        else None
+    )
+    outputs["acs_context_clean"] = (
+        acs_config.clean_output_path
+        if load_acs_context(acs_config) is not None
         else None
     )
     student_clean_path, _ = save_clean_student_housing(student_config)

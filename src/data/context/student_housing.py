@@ -8,8 +8,10 @@ from typing import Any
 
 import pandas as pd
 
-from src.data.features import normalize_address, normalize_string, normalize_zip
+from src.data.features import normalize_string, normalize_zip
 from src.data.violations import _standardize_columns
+
+from .common import build_address_zip_key, build_address_zip_key_from_series
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class StudentHousingConfig:
         "uar_fall_2022.xlsx",
         "uar_fall_2023.xlsx",
     )
+    default_summary_path: Path | None = Path("data/reference/student_housing_zip_2023.csv")
     clean_output_path: Path = Path("data/processed/student_housing_clean.csv")
     output_path: Path = Path("data/processed/student_housing_context_v1.csv")
     summary_output_path: Path = Path("data/processed/student_housing_summary_v1.csv")
@@ -62,6 +65,17 @@ def load_student_housing_data(config: StudentHousingConfig) -> tuple[pd.DataFram
             "student_housing_available": True,
             "source_path": str(path),
             "grain": detect_student_housing_grain(cleaned),
+        }
+        return cleaned, diagnostics
+
+    if config.default_summary_path is not None and config.default_summary_path.exists():
+        fallback = pd.read_csv(config.default_summary_path, low_memory=False)
+        cleaned = clean_student_housing(fallback)
+        diagnostics = {
+            "student_housing_available": True,
+            "source_path": str(config.default_summary_path),
+            "grain": detect_student_housing_grain(cleaned),
+            "student_housing_default_source": True,
         }
         return cleaned, diagnostics
 
@@ -117,12 +131,7 @@ def clean_student_housing(df: pd.DataFrame) -> pd.DataFrame:
     )
     zip_col = next((column for column in ["zip", "zip_code", "postal_code"] if column in cleaned.columns), None)
     if address_col and zip_col:
-        cleaned["address_zip_key"] = (
-            cleaned[address_col].map(normalize_address).astype("string").str.cat(
-                cleaned[zip_col].map(normalize_zip).astype("string"),
-                sep="|",
-            )
-        )
+        cleaned["address_zip_key"] = build_address_zip_key(cleaned, address_col, zip_col)
     return cleaned
 
 
@@ -149,16 +158,15 @@ def build_student_housing_context(
     grain = diagnostics.get("grain")
     if (
         grain == "row_level"
-        and {"violation_st", "violation_zip"}.issubset(base_df.columns)
+        and ("address_zip_key" in base_df.columns or {"violation_st", "violation_zip"}.issubset(base_df.columns))
         and "address_zip_key" in student_df.columns
     ):
         context = base_df.copy()
-        context["address_zip_key"] = (
-            context["violation_st"].map(normalize_address).astype("string").str.cat(
-                context["violation_zip"].map(normalize_zip).astype("string"),
-                sep="|",
+        if "address_zip_key" not in context.columns:
+            context["address_zip_key"] = build_address_zip_key_from_series(
+                context["violation_st"],
+                context["violation_zip"],
             )
-        )
         joined = context.merge(student_df, on="address_zip_key", how="left", suffixes=("", "_student"))
         diagnostics["student_context_join"] = "row_level_address_zip_approximate"
         diagnostics["student_output_type"] = "context"

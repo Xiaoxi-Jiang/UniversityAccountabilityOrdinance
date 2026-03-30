@@ -33,6 +33,23 @@ def test_clean_property_assessment_builds_join_key():
     assert out.iloc[0]["owner_clean"] == "acme"
 
 
+def test_clean_property_assessment_handles_float_street_number_and_zip():
+    df = pd.DataFrame(
+        {
+            "MAP_PAR_ID": [100001000],
+            "LOC_ID": ["L1"],
+            "ST_NUM": [195.0],
+            "ST_NAME": ["Lexington ST"],
+            "ZIP_CODE": [2128.0],
+        }
+    )
+
+    out = clean_property_assessment(df)
+
+    assert out.iloc[0]["property_address"] == "195 Lexington ST"
+    assert out.iloc[0]["address_zip_key"] == "195 lexington st|02128"
+
+
 def test_build_property_risk_table_joins_assessment_by_address():
     feature_df = pd.DataFrame(
         {
@@ -67,8 +84,43 @@ def test_build_property_risk_table_joins_assessment_by_address():
 
 def test_load_student_housing_data_handles_missing_file(tmp_path: Path):
     student_df, diagnostics = load_student_housing_data(
-        StudentHousingConfig(raw_dir=tmp_path)
+        StudentHousingConfig(
+            raw_dir=tmp_path,
+            default_summary_path=None,
+            clean_output_path=tmp_path / "student_clean.csv",
+            output_path=tmp_path / "student_context.csv",
+            summary_output_path=tmp_path / "student_summary.csv",
+        )
     )
 
     assert student_df is None
     assert diagnostics["student_housing_available"] is False
+
+
+def test_load_student_housing_data_uses_default_summary_when_local_missing(tmp_path: Path):
+    summary_path = tmp_path / "student_housing_zip_2023.csv"
+    pd.DataFrame(
+        {
+            "neighborhood": ["Allston"],
+            "zip": ["02134"],
+            "undergraduates": [2036],
+            "graduates": [2471],
+            "all_students": [4507],
+            "report_year": [2023],
+        }
+    ).to_csv(summary_path, index=False)
+
+    student_df, diagnostics = load_student_housing_data(
+        StudentHousingConfig(
+            raw_dir=tmp_path,
+            default_summary_path=summary_path,
+            clean_output_path=tmp_path / "student_clean.csv",
+            output_path=tmp_path / "student_context.csv",
+            summary_output_path=tmp_path / "student_summary.csv",
+        )
+    )
+
+    assert student_df is not None
+    assert diagnostics["student_housing_available"] is True
+    assert diagnostics["grain"] == "summary_level"
+    assert diagnostics["student_housing_default_source"] is True
