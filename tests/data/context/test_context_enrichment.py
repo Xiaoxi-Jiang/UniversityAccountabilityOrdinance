@@ -1,7 +1,9 @@
 import pandas as pd
+import requests
 
 from src.data.context.acs import clean_acs_context
 from src.data.context.address import clean_sam_addresses
+from src.data.context.common import download_arcgis_layer
 from src.data.context.permits import aggregate_permits, clean_permits
 from src.data.context.property import build_property_risk_table
 from src.data.context.service_requests import aggregate_service_requests, clean_service_requests
@@ -134,6 +136,294 @@ def test_clean_acs_context_derives_zip_level_features():
     assert out.iloc[0]["acs_zip"] == "02118"
     assert out.iloc[0]["acs_renter_occupied_share"] == 0.6
     assert out.iloc[0]["acs_vacancy_rate"] == 0.1
+
+
+def test_download_arcgis_layer_reports_progress_and_saves_csv(tmp_path, monkeypatch, capsys):
+    output_path = tmp_path / "building_permits.csv"
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "features": [
+                    {
+                        "attributes": {
+                            "permitnumber": "A1000569",
+                            "address": "181-183 State ST",
+                        }
+                    }
+                ]
+            }
+
+    def fake_get(url, params, timeout):
+        del url, params, timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("src.data.context.common.requests.get", fake_get)
+
+    path = download_arcgis_layer(
+        "https://example.com/arcgis/query",
+        output_path,
+        timeout=12,
+    )
+
+    captured = capsys.readouterr().out
+    assert path == output_path
+    assert output_path.exists()
+    assert "Starting remote context-data download: building_permits.csv" in captured
+    assert "Requesting page 1 (offset=0)" in captured
+    assert "Response status for page 1: 200" in captured
+    assert "Received 1 records on page 1; total downloaded: 1" in captured
+    assert "Saved raw context-data snapshot:" in captured
+
+
+def test_download_arcgis_layer_reports_timeout_context(tmp_path, monkeypatch, capsys):
+    output_path = tmp_path / "building_permits.csv"
+
+    def fake_get(url, params, timeout):
+        del url, params, timeout
+        raise requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr("src.data.context.common.requests.get", fake_get)
+
+    path = download_arcgis_layer(
+        "https://example.com/arcgis/query",
+        output_path,
+        timeout=12,
+    )
+
+    captured = capsys.readouterr().out
+    assert path is None
+    assert "Starting remote context-data download: building_permits.csv" in captured
+    assert "Requesting page 1 (offset=0)" in captured
+    assert "Skipping remote context-data download for building_permits.csv" in captured
+    assert "0 successful page(s) and 0 records" in captured
+    assert "no HTTP response status was received" in captured
+
+
+def test_download_arcgis_layer_by_object_ids_saves_complete_snapshot(tmp_path, monkeypatch, capsys):
+    output_path = tmp_path / "building_permits.csv"
+
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, params, timeout):
+        del url, timeout
+        if params.get("returnIdsOnly") == "true":
+            return FakeResponse(
+                {
+                    "objectIdFieldName": "objectid",
+                    "objectIds": [1, 2, 3],
+                }
+            )
+        raise AssertionError(f"Unexpected GET params: {params}")
+
+    def fake_post(url, data, timeout):
+        del url, timeout
+        object_ids = data.get("objectIds")
+        if object_ids == "1,2":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 1, "permitnumber": "A1"}},
+                        {"attributes": {"objectid": 2, "permitnumber": "A2"}},
+                    ]
+                }
+            )
+        if object_ids == "3":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 3, "permitnumber": "A3"}},
+                    ]
+                }
+            )
+        raise AssertionError(f"Unexpected POST data: {data}")
+
+    monkeypatch.setattr("src.data.context.common.requests.get", fake_get)
+    monkeypatch.setattr("src.data.context.common.requests.post", fake_post)
+
+    path = download_arcgis_layer(
+        "https://example.com/arcgis/query",
+        output_path,
+        timeout=12,
+        use_object_id_chunks=True,
+        chunk_size=2,
+        max_workers=2,
+        max_attempts=1,
+    )
+
+    captured = capsys.readouterr().out
+    out = pd.read_csv(output_path)
+    assert path == output_path
+    assert len(out) == 3
+    assert set(out["objectid"]) == {1, 2, 3}
+    assert "Download mode: object-ID chunks" in captured
+    assert "Requesting object ID inventory" in captured
+    assert "Received 3 object IDs. Downloading in 2 chunk(s) with 2 worker(s)" in captured
+    assert "Saved raw context-data snapshot:" in captured
+
+
+def test_download_arcgis_layer_by_object_ids_rejects_incomplete_snapshot(tmp_path, monkeypatch, capsys):
+    output_path = tmp_path / "building_permits.csv"
+
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, params, timeout):
+        del url, timeout
+        if params.get("returnIdsOnly") == "true":
+            return FakeResponse(
+                {
+                    "objectIdFieldName": "objectid",
+                    "objectIds": [1, 2, 3],
+                }
+            )
+        raise AssertionError(f"Unexpected GET params: {params}")
+
+    def fake_post(url, data, timeout):
+        del url, timeout
+        object_ids = data.get("objectIds")
+        if object_ids == "1,2":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 1, "permitnumber": "A1"}},
+                        {"attributes": {"objectid": 2, "permitnumber": "A2"}},
+                    ]
+                }
+            )
+        if object_ids == "3":
+            return FakeResponse({"features": []})
+        raise AssertionError(f"Unexpected POST data: {data}")
+
+    monkeypatch.setattr("src.data.context.common.requests.get", fake_get)
+    monkeypatch.setattr("src.data.context.common.requests.post", fake_post)
+
+    path = download_arcgis_layer(
+        "https://example.com/arcgis/query",
+        output_path,
+        timeout=12,
+        use_object_id_chunks=True,
+        chunk_size=2,
+        max_workers=1,
+        max_attempts=1,
+    )
+
+    captured = capsys.readouterr().out
+    assert path is None
+    assert not output_path.exists()
+    assert "during object-ID chunk download" in captured
+    assert "could not recover object ID 3" in captured
+
+
+def test_download_arcgis_layer_by_object_ids_recovers_by_splitting_incomplete_chunk(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    output_path = tmp_path / "building_permits.csv"
+
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, params, timeout):
+        del url, timeout
+        if params.get("returnIdsOnly") == "true":
+            return FakeResponse(
+                {
+                    "objectIdFieldName": "objectid",
+                    "objectIds": [1, 2, 3, 4],
+                }
+            )
+        raise AssertionError(f"Unexpected GET params: {params}")
+
+    post_calls: dict[str, int] = {}
+
+    def fake_post(url, data, timeout):
+        del url, timeout
+        object_ids = data.get("objectIds")
+        post_calls[object_ids] = post_calls.get(object_ids, 0) + 1
+        if object_ids == "1,2,3,4":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 1, "permitnumber": "A1"}},
+                        {"attributes": {"objectid": 2, "permitnumber": "A2"}},
+                        {"attributes": {"objectid": 3, "permitnumber": "A3"}},
+                    ]
+                }
+            )
+        if object_ids == "1,2":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 1, "permitnumber": "A1"}},
+                        {"attributes": {"objectid": 2, "permitnumber": "A2"}},
+                    ]
+                }
+            )
+        if object_ids == "3,4":
+            return FakeResponse(
+                {
+                    "features": [
+                        {"attributes": {"objectid": 3, "permitnumber": "A3"}},
+                        {"attributes": {"objectid": 4, "permitnumber": "A4"}},
+                    ]
+                }
+            )
+        raise AssertionError(f"Unexpected POST data: {data}")
+
+    monkeypatch.setattr("src.data.context.common.requests.get", fake_get)
+    monkeypatch.setattr("src.data.context.common.requests.post", fake_post)
+
+    path = download_arcgis_layer(
+        "https://example.com/arcgis/query",
+        output_path,
+        timeout=12,
+        use_object_id_chunks=True,
+        chunk_size=4,
+        max_workers=1,
+        max_attempts=1,
+    )
+
+    captured = capsys.readouterr().out
+    out = pd.read_csv(output_path)
+    assert path == output_path
+    assert len(out) == 4
+    assert set(out["objectid"]) == {1, 2, 3, 4}
+    assert post_calls["1,2,3,4"] == 1
+    assert post_calls["1,2"] == 1
+    assert post_calls["3,4"] == 1
+    assert "splitting into subchunks of 2 and 2 IDs" in captured
 
 
 def test_build_property_risk_table_prefers_sam_identifier_path():
