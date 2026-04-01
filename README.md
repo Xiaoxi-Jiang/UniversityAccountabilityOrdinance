@@ -73,7 +73,7 @@ make fetch-rentsmart
 
 What they do:
 - `make prepare-data`: downloads and cleans the source violations dataset
-  and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available
+  and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available, including an automatic RentSmart fetch when no local extract is present
 - `make pipeline`: builds violations features, enriches them with SAM/geocoder, property assessment, parcels, 311, permits, ACS, and optional RentSmart/student-housing context, then generates EDA tables/figures and runs the baseline model
 - the pipeline also writes a short narrative check-in summary and direct student-housing relationship outputs when student-housing context is available
 - `make baseline-model`: trains the property-level baseline model from cleaned violations history and saves both metrics and coefficient summaries
@@ -175,7 +175,7 @@ Optional data notes:
 - Building permits are configured against Boston's public ArcGIS permits service and cached to `data/raw/` when available.
 - ACS ZIP context is pulled from the Census ACS 5-year API when a local extract is not present.
 - 311 service requests are pulled automatically from Boston Open Data's `311 Service Requests` CKAN package when a local `data/raw/service_requests_311.csv` file is not present. The loader combines the current-year CSV, previous-year CSV, and the `NEW SYSTEM` CSV when available.
-- RentSmart is treated as optional because the project can run without it, but a public dashboard export path is now available from [Boston.gov](https://www.boston.gov/departments/analytics-team/rentsmart-boston).
+- RentSmart is treated as optional because the project can run without it, but a public dashboard export path is now available from [Boston.gov](https://www.boston.gov/departments/analytics-team/rentsmart-boston) and is attempted automatically during `make prepare-data` when no local extract is present.
 - Student housing uses a local file when present. If not, the pipeline falls back to a bundled ZIP-level summary derived from the official `Boston Student Housing Report` so the student-context layer can still run in summary form.
 - Expected local raw file names include:
   `data/raw/sam_addresses.csv`,
@@ -185,7 +185,7 @@ Optional data notes:
   `data/raw/student_housing.xlsx`, `data/raw/student_housing.csv`,
   `data/raw/uar_fall_2022.xlsx`, `data/raw/uar_fall_2023.xlsx`,
   and optionally `data/raw/rentsmart.csv` / `data/raw/rentsmart.xlsx` / `data/raw/rentsmart.geojson`.
-- To fetch the public RentSmart extract directly, run `make fetch-rentsmart`.
+- To fetch or refresh the public RentSmart extract directly, run `make fetch-rentsmart`.
 - Student housing integration expects one of those local files. If missing, the pipeline logs the limitation and skips that layer.
 - A bundled fallback summary is stored at `data/reference/student_housing_zip_2023.csv`.
 - Property-risk enrichment now prefers SAM-normalized identifier joins before falling back to address+ZIP matches.

@@ -29,7 +29,7 @@ Top negative coefficient directions:
 
 ## Student Housing Relationship
 - Student housing is now analyzed directly with ZIP-level relationship outputs, including `student_housing_relationship.csv`, `student_housing_correlation_summary.csv`, and `student_housing_relationship.png`.
-- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4526, correlation with violations per property = -0.1762.
+- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4526, correlation between `Students per Property` and violation intensity = -0.1888.
 
 ## Preliminary Results and Interpretation
 - Modeling frame: 10176 properties, 37 positive examples (0.0036 positive rate).
