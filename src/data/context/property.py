@@ -46,6 +46,7 @@ class PropertyDataConfig:
     property_assessment_candidates: tuple[str, ...] = ("property_assessment_fy25.csv",)
     parcels_candidates: tuple[str, ...] = ("parcels_current.csv", "parcels_current.geojson")
     rentsmart_candidates: tuple[str, ...] = ("rentsmart.csv", "rentsmart.xlsx", "rentsmart.geojson")
+    rentsmart_auto_download: bool = True
     property_assessment_url: str | None = PROPERTY_ASSESSMENT_URL
     parcels_url: str | None = PARCELS_CURRENT_URL
     property_assessment_clean_output: Path = Path("data/processed/property_assessment_clean.csv")
@@ -128,6 +129,31 @@ def _load_context_source(
     cleaned = clean_fn(load_local_tabular(raw_path))
     save_clean_output(cleaned, clean_output_path)
     return cleaned
+
+
+def _download_rentsmart_extract(config: PropertyDataConfig) -> Path | None:
+    from .rentsmart import (
+        RentSmartDownloadConfig,
+        RentSmartDownloadError,
+        download_rentsmart_csv,
+    )
+
+    output_path = config.raw_dir / config.rentsmart_candidates[0]
+    try:
+        return download_rentsmart_csv(RentSmartDownloadConfig(output_path=output_path))
+    except RentSmartDownloadError as exc:
+        print(
+            "RentSmart data unavailable: automatic public dashboard download failed: "
+            f"{exc}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            "RentSmart data unavailable: automatic public dashboard download failed "
+            f"unexpectedly: {exc}",
+            flush=True,
+        )
+    return None
 
 
 def _coalesce_lookup(
@@ -349,15 +375,27 @@ def load_parcels(config: PropertyDataConfig) -> pd.DataFrame | None:
 
 
 def load_rentsmart(config: PropertyDataConfig) -> pd.DataFrame | None:
-    """Load a local RentSmart extract if the project team has one."""
-    return _load_context_source(
-        raw_dir=config.raw_dir,
-        candidates=config.rentsmart_candidates,
-        clean_output_path=config.rentsmart_clean_output,
-        remote_url=None,
-        clean_fn=clean_rentsmart,
-        missing_message="RentSmart data unavailable: no local CSV/XLSX/GeoJSON extract was found.",
-    )
+    """Load a local RentSmart extract, or fetch the public export when needed."""
+    existing = load_existing_clean_output(config.rentsmart_clean_output)
+    if existing is not None:
+        cleaned_existing = clean_rentsmart(existing)
+        save_clean_output(cleaned_existing, config.rentsmart_clean_output)
+        return cleaned_existing
+
+    raw_path = find_local_file(config.raw_dir, config.rentsmart_candidates)
+    if raw_path is None and config.rentsmart_auto_download:
+        raw_path = _download_rentsmart_extract(config)
+    if raw_path is None:
+        print(
+            "RentSmart data unavailable: no local CSV/XLSX/GeoJSON extract was found "
+            "and automatic public download did not succeed.",
+            flush=True,
+        )
+        return None
+
+    cleaned = clean_rentsmart(load_local_tabular(raw_path))
+    save_clean_output(cleaned, config.rentsmart_clean_output)
+    return cleaned
 
 
 def _aggregate_rentsmart_join(rentsmart_df: pd.DataFrame, join_key: str) -> pd.DataFrame:
