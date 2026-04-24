@@ -91,6 +91,16 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
             "PERMIT_TYPE": ["Renovation"],
         }
     )
+    rentsmart_df = pd.DataFrame(
+        {
+            "FULL_ADDRESS": ["12 Main St"],
+            "ZIP_CODE": ["02118"],
+            "PARCEL": ["0001"],
+            "DATE": ["2024-02-01"],
+            "TYPE": ["Housing Complaint"],
+            "DESCRIPTION": ["Unsanitary conditions"],
+        }
+    )
     acs_df = pd.DataFrame(
         {
             "ZIP": ["02118"],
@@ -137,6 +147,15 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
         fake_download,
     )
 
+    def fake_download_rentsmart(config):
+        rentsmart_df.to_csv(config.output_path, index=False)
+        return config.output_path
+
+    monkeypatch.setattr(
+        "src.data.context.rentsmart.download_rentsmart_csv",
+        fake_download_rentsmart,
+    )
+
     raw_path, cleaned_path = run_phase1(
         Phase1Config(raw_dir=raw_dir, processed_dir=processed_dir)
     )
@@ -146,6 +165,7 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
     assert (processed_dir / "property_assessment_clean.csv").exists()
     assert (processed_dir / "sam_addresses_clean.csv").exists()
     assert (processed_dir / "parcels_clean.csv").exists()
+    assert (processed_dir / "rentsmart_clean.csv").exists()
     assert (processed_dir / "service_requests_311_clean.csv").exists()
     assert (processed_dir / "building_permits_clean.csv").exists()
     assert (processed_dir / "acs_context_clean.csv").exists()
