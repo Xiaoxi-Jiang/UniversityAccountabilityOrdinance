@@ -5,6 +5,9 @@ PYTHON ?= python3
 install:
 	$(PYTHON) -m pip install -r requirements.txt
 
+fetch-rentsmart:
+	$(PYTHON) -m src.data.context.rentsmart
+
 prepare-data:
 	$(PYTHON) -m src.data.violations
 
@@ -22,9 +25,6 @@ baseline-model:
 
 improved-model:
 	$(PYTHON) -m src.modeling.improved_model
-
-fetch-rentsmart:
-	$(PYTHON) -m src.data.context.rentsmart
 
 phase1: prepare-data
 

@@ -185,6 +185,8 @@ def build_student_housing_context(
             .rename(columns={"violation_zip": zip_col})
         )
         zip_summary[zip_col] = zip_summary[zip_col].map(normalize_zip).astype("string")
+        student_df[zip_col] = student_df[zip_col].map(normalize_zip).astype("string")
+
         merged = zip_summary.merge(student_df, on=[zip_col], how="left")
         diagnostics["student_context_join"] = "zip_level_summary"
         diagnostics["student_output_type"] = "summary"
