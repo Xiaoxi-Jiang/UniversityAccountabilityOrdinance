@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: install prepare-data build-features eda pipeline baseline-model fetch-rentsmart phase1 phase2 test
+.PHONY: install prepare-data build-features eda pipeline baseline-model improved-model fetch-rentsmart phase1 phase2 test
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -19,6 +19,9 @@ pipeline:
 
 baseline-model:
 	$(PYTHON) -m src.modeling.baseline_model
+
+improved-model:
+	$(PYTHON) -m src.modeling.improved_model
 
 fetch-rentsmart:
 	$(PYTHON) -m src.data.context.rentsmart

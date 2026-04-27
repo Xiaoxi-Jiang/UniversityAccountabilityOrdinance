@@ -28,6 +28,7 @@ from src.data.features import (
     run_phase2_feature_engineering,
 )
 from src.modeling.baseline_model import BaselineModelConfig, run_baseline_model
+from src.modeling.improved_model import ImprovedModelConfig, run_improved_model
 
 
 def _print_paths(label: str, paths: list[Path]) -> None:
@@ -148,6 +149,12 @@ def main() -> None:
         raw_path=DEFAULT_RAW_PATH,
     )
     model_path = run_baseline_model(baseline_config)
+    improved_config = ImprovedModelConfig(
+        input_path=DEFAULT_INPUT_PATH,
+        raw_path=DEFAULT_RAW_PATH,
+        property_risk_path=property_risk_path,
+    )
+    run_improved_model(improved_config)
     checkin_summary_path = write_checkin_summary(
         output_path=Path("outputs/checkin_summary.md"),
         feature_path=feature_path,
