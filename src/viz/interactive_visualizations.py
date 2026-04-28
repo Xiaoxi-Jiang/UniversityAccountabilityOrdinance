@@ -575,7 +575,10 @@ def generate_interactive_model_outputs(config: InteractiveVisualizationConfig) -
     results = pd.read_csv(config.improved_model_results_path)
     metric_cols = [
         column
-        for column in ["balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+        for column in [
+            "balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc",
+            "precision_at_10", "precision_at_25", "precision_at_50", "precision_at_100",
+        ]
         if column in results.columns
     ]
     required_cols = {"model_name", "feature_set"}
@@ -851,7 +854,10 @@ def _dashboard_model_data(config: InteractiveVisualizationConfig) -> dict[str, A
     results = pd.read_csv(config.improved_model_results_path)
     metric_cols = [
         column
-        for column in ["balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+        for column in [
+            "balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc",
+            "precision_at_10", "precision_at_25", "precision_at_50", "precision_at_100",
+        ]
         if column in results.columns
     ]
     records = _records_for_dashboard(results)
@@ -871,6 +877,10 @@ def _dashboard_model_data(config: InteractiveVisualizationConfig) -> dict[str, A
         "f1": "F1",
         "roc_auc": "ROC-AUC",
         "pr_auc": "PR-AUC",
+        "precision_at_10": "Precision@10",
+        "precision_at_25": "Precision@25",
+        "precision_at_50": "Precision@50",
+        "precision_at_100": "Precision@100",
     }
     return {
         "available": True,
@@ -1171,6 +1181,12 @@ def _dashboard_html(data: dict[str, Any]) -> str:
           <div class="panel tall"><div id="modelMetricChart" class="plot tall"></div></div>
           <div class="panel tall"><div id="featureImportanceChart" class="plot tall"></div></div>
         </div>
+        <div class="grid one" style="margin-top:16px">
+          <div class="panel">
+            <p class="note">Precision@K — if the model flags the top K highest-risk properties, what fraction are true positives? Higher is better; baseline random selection would equal the positive rate (~0.34%).</p>
+            <div id="precisionAtKChart" class="plot"></div>
+          </div>
+        </div>
       </section>
       <section id="artifacts" class="tab-panel">
         <div class="section-head"><h2>Generated HTML Exports</h2></div>
@@ -1189,6 +1205,10 @@ def _dashboard_html(data: dict[str, Any]) -> str:
         f1: "F1",
         roc_auc: "ROC-AUC",
         pr_auc: "PR-AUC",
+        precision_at_10: "Precision@10",
+        precision_at_25: "Precision@25",
+        precision_at_50: "Precision@50",
+        precision_at_100: "Precision@100",
         students_per_property: "Students per Property",
         student_housing_metric: "All Students",
         violations_per_property: "Violations per Property",
@@ -1490,8 +1510,8 @@ def _dashboard_html(data: dict[str, Any]) -> str:
             x: rows.map(d => pretty(d.model_name)),
             y: rows.map(d => d[metric]),
             marker: {{ color: COLORS[i % COLORS.length] }},
-            customdata: rows.map(d => [d.n_positive, d.positive_class_rate, d.cv_folds, d.precision, d.recall, d.pr_auc]),
-            hovertemplate: "Model=%{{x}}<br>" + labelFor(metric) + "=%{{y:.4f}}<br>Positive n=%{{customdata[0]}}<br>Positive rate=%{{customdata[1]:.4f}}<br>CV folds=%{{customdata[2]}}<br>Precision=%{{customdata[3]:.4f}}<br>Recall=%{{customdata[4]:.4f}}<br>PR-AUC=%{{customdata[5]:.4f}}<extra></extra>"
+            customdata: rows.map(d => [d.n_positive, d.positive_class_rate, d.cv_folds, d.precision, d.recall, d.pr_auc, d.valid_cv_folds ?? "-"]),
+            hovertemplate: "Model=%{{x}}<br>" + labelFor(metric) + "=%{{y:.4f}}<br>Positive n=%{{customdata[0]}}<br>Positive rate=%{{customdata[1]:.4f}}<br>CV folds=%{{customdata[2]}}<br>Valid folds=%{{customdata[6]}}<br>Precision=%{{customdata[3]:.4f}}<br>Recall=%{{customdata[4]:.4f}}<br>PR-AUC=%{{customdata[5]:.4f}}<extra></extra>"
           }};
         }});
         Plotly.react("modelMetricChart", traces, plotLayout(`${{pretty(target)}}: ${{labelFor(metric)}}`, "Model", labelFor(metric), {{ barmode: "group", yaxis: {{ title: labelFor(metric), range: [0, Math.min(1, Math.max(0.05, ...filtered.map(d => Number(d[metric] || 0))) * 1.18)] }} }}), plotConfig);
@@ -1513,6 +1533,29 @@ def _dashboard_html(data: dict[str, Any]) -> str:
             hovertemplate: "%{{y}}<br>Abs importance=%{{x:.4f}}<br>Signed value=%{{customdata[0]:.4f}}<br>Type=%{{customdata[1]}}<extra></extra>"
           }}], plotLayout(`Top Features: ${{pretty(modelName)}} / ${{pretty(featureSet)}}`, "Absolute Importance", "Feature", {{ showlegend: false, margin: {{ l: 210, r: 26, t: 58, b: 64 }} }}), plotConfig);
         }} else emptyPlot("featureImportanceChart", "No feature-importance rows for this target/model/feature set.");
+
+        // Precision@K curve — one line per model × feature_set combination
+        const kValues = [10, 25, 50, 100];
+        const allModelRows = DATA.model.records.filter(d => (d.target_label || d.target) === target);
+        const combos = [...new Map(allModelRows.map(d => [d.feature_set + "|" + d.model_name, d])).values()];
+        const kTraces = combos.map((d, i) => ({{
+          type: "scatter",
+          mode: "lines+markers",
+          name: pretty(d.model_name) + " / " + pretty(d.feature_set),
+          x: kValues,
+          y: kValues.map(k => d["precision_at_" + k] ?? null),
+          line: {{ color: COLORS[i % COLORS.length], width: 2.5 }},
+          marker: {{ size: 9 }},
+          hovertemplate: "K=%{{x}}<br>Precision@K=%{{y:.4f}}<extra>" + pretty(d.model_name) + " / " + pretty(d.feature_set) + "</extra>"
+        }}));
+        const hasKData = kTraces.some(t => t.y.some(v => v !== null));
+        if (hasKData) {{
+          Plotly.react("precisionAtKChart", kTraces, plotLayout(
+            `Precision@K — ${{pretty(target)}}`,
+            "K (top-K properties flagged)", "Precision@K",
+            {{ hovermode: "x unified", legend: {{ orientation: "h", y: -0.28 }}, height: 380 }}
+          ), plotConfig);
+        }} else emptyPlot("precisionAtKChart", "Precision@K data unavailable — rerun make improved-model to generate.");
       }}
 
       function activateTab(tabId) {{
