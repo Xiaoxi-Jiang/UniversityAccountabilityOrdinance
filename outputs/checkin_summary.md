@@ -4,10 +4,10 @@
 This pipeline now treats the baseline task as a property-level prediction problem: given each property's historical violations up to the cutoff date, predict whether it will receive a new high-risk violation during the next prediction window.
 
 ## Data Processing Progress
-- Core cleaned violations table: `data/processed/violations_clean.csv`
-- Property-level feature table: `data/processed/violations_feature_table_v1.csv`
-- Enriched property-risk table: `data/processed/property_risk_table_v1.csv`
-- Student housing context output: `data/processed/student_housing_summary_v1.csv`
+- Core cleaned violations table: `data\processed\violations_clean.csv`
+- Property-level feature table: `data\processed\violations_feature_table_v1.csv`
+- Enriched property-risk table: `data\processed\property_risk_table_v1.csv`
+- Student housing context output: `data\processed\student_housing_summary_v1.csv`
 - Property-key coverage relies primarily on normalized address and ZIP joins; 99.9% of rows use address-based keys and 0.1% fall back to case numbers.
 - Context coverage from optional sources: SAM=yes, assessment=yes, parcels=yes, 311=yes, permits=yes, ACS=yes.
 - Owner coverage in the property-risk table: 88.5% (9287 of 10498 properties).
@@ -18,22 +18,22 @@ This pipeline now treats the baseline task as a property-level prediction proble
 - Model: logistic regression with standardized numeric features and balanced class weights to offset the rare-event target.
 
 Top positive coefficient directions:
-- `history_high_risk_violations` (1.955)
-- `distinct_violation_types` (1.386)
-- `recent_violation_count_365d` (0.934)
+- `history_high_risk_violations` (1.962)
+- `distinct_violation_types` (1.390)
+- `recent_violation_count_365d` (0.933)
 
 Top negative coefficient directions:
-- `open_violations` (-2.533)
-- `total_violations` (-1.661)
-- `history_open_share` (-1.166)
+- `open_violations` (-2.535)
+- `total_violations` (-1.670)
+- `history_open_share` (-1.165)
 
 ## Student Housing Relationship
 - Student housing is now analyzed directly with ZIP-level relationship outputs, including `student_housing_relationship.csv`, `student_housing_correlation_summary.csv`, and `student_housing_relationship.png`.
-- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4950, correlation between `Students per Property` and violation intensity = -0.2546.
+- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4517, correlation between `Students per Property` and violation intensity = -0.1916.
 
 ## Preliminary Results and Interpretation
 - Modeling frame: 10186 properties, 35 positive examples (0.0034 positive rate).
-- Holdout metrics: accuracy=0.8933, balanced_accuracy=0.5841, precision=0.0093, recall=0.2727, f1=0.0181, roc_auc=0.6564.
+- Holdout metrics: accuracy=0.8930, balanced_accuracy=0.5840, precision=0.0093, recall=0.2727, f1=0.0180, roc_auc=0.6563.
 - Majority-class accuracy is 0.9964, so balanced accuracy and recall are more informative than raw accuracy because the target event is rare.
 - Current limitations: severity is still proxy-based rather than an official city severity field; student housing is measured mostly at ZIP level; and the baseline model only uses historical violation behavior, not the full static property context yet.
 - Student housing context is therefore informative for exploration, but not yet evidence of a causal relationship between student concentration and violations.

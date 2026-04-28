@@ -28,6 +28,7 @@ try:
 except ImportError:
     _XGBOOST_AVAILABLE = False
 
+from src.data.context.property import normalize_property_identifier
 from src.data.features import DEFAULT_INPUT_PATH, DEFAULT_RAW_PATH, Phase2FeatureConfig, load_phase2_source_data
 from src.modeling.baseline_model import build_property_level_modeling_frame
 
@@ -86,14 +87,31 @@ OWNER_FEATURE_COLS = [
     "owner_high_risk_share",
 ]
 
-ALL_STATIC_FEATURES = (
-    ACS_FEATURES
-    + ASSESSMENT_FEATURES
-    + RENTSMART_FEATURES
-    + SERVICE_REQUEST_FEATURES
-    + PERMIT_FEATURES
-    + OWNER_FEATURE_COLS
-)
+LEAKAGE_SAFE_STATIC_FEATURES = ACS_FEATURES + ASSESSMENT_FEATURES
+# 311 is excluded until the local extract contains records before the training cutoff.
+EXCLUDED_TEMPORAL_CONTEXT_FEATURES = SERVICE_REQUEST_FEATURES
+MODEL_CONTEXT_FEATURES = LEAKAGE_SAFE_STATIC_FEATURES + OWNER_FEATURE_COLS + RENTSMART_FEATURES + PERMIT_FEATURES
+
+PERMIT_CONTEXT_COLUMNS = [
+    "map_par_id",
+    "pid",
+    "address_zip_key",
+    "permit_issue_date",
+    "major_permit_flag",
+    "permit_record_count",
+]
+
+RENTSMART_CONTEXT_COLUMNS = [
+    "map_par_id",
+    "address_zip_key",
+    "address_only_key",
+    "violation_date",
+    "date",
+    "type",
+    "violation_type",
+    "description",
+    "violation_description",
+]
 
 
 @dataclass(frozen=True)
@@ -101,6 +119,8 @@ class ImprovedModelConfig:
     input_path: Path = DEFAULT_INPUT_PATH
     raw_path: Path = DEFAULT_RAW_PATH
     property_risk_path: Path = Path("data/processed/property_risk_table_v1.csv")
+    permits_context_path: Path = Path("data/processed/building_permits_clean.csv")
+    rentsmart_context_path: Path = Path("data/processed/rentsmart_clean.csv")
     output_path: Path = Path("outputs/tables/improved_model_results.csv")
     feature_importance_path: Path = Path("outputs/tables/improved_model_feature_importance.csv")
     prediction_window_days: int = 365
@@ -155,6 +175,195 @@ def add_owner_level_features(risk_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _read_optional_context_csv(path: Path, columns: list[str]) -> pd.DataFrame | None:
+    if not path.exists():
+        return None
+    available = pd.read_csv(path, nrows=0).columns.tolist()
+    usecols = [column for column in columns if column in available]
+    if not usecols:
+        return None
+    return pd.read_csv(path, usecols=usecols, low_memory=False)
+
+
+def _normalize_join_key(series: pd.Series, *, identifier: bool) -> pd.Series:
+    if identifier:
+        return series.map(normalize_property_identifier).astype("string").replace("", pd.NA)
+    return series.astype("string").str.strip().replace("", pd.NA)
+
+
+def _merge_context_by_priority(
+    property_lookup: pd.DataFrame,
+    aggregated_frames: list[tuple[str, str, bool, pd.DataFrame]],
+    feature_cols: list[str],
+) -> pd.DataFrame:
+    output = pd.DataFrame({"property_key": property_lookup["property_key"]})
+    for column in feature_cols:
+        output[column] = np.nan
+
+    for left_col, right_col, identifier, aggregated in aggregated_frames:
+        if left_col not in property_lookup.columns or right_col not in aggregated.columns or aggregated.empty:
+            continue
+
+        left = property_lookup[["property_key", left_col]].copy()
+        left["_join_key"] = _normalize_join_key(left[left_col], identifier=identifier)
+        right = aggregated[[right_col] + feature_cols].copy()
+        right["_join_key"] = _normalize_join_key(right[right_col], identifier=identifier)
+        right = right.dropna(subset=["_join_key"]).drop_duplicates("_join_key")
+        matched = left.merge(right[["_join_key"] + feature_cols], on="_join_key", how="left")
+
+        for column in feature_cols:
+            fill_mask = output[column].isna() & matched[column].notna()
+            output.loc[fill_mask, column] = matched.loc[fill_mask, column].to_numpy()
+
+    output[feature_cols] = output[feature_cols].fillna(0)
+    return output
+
+
+def _aggregate_permits_before_cutoff(
+    permits_df: pd.DataFrame,
+    *,
+    join_key: str,
+    cutoff_date: pd.Timestamp,
+) -> pd.DataFrame:
+    if join_key not in permits_df.columns or "permit_issue_date" not in permits_df.columns:
+        return pd.DataFrame(columns=[join_key] + PERMIT_FEATURES)
+
+    working = permits_df.dropna(subset=[join_key]).copy()
+    working["permit_issue_date"] = pd.to_datetime(working["permit_issue_date"], errors="coerce")
+    working = working.loc[working["permit_issue_date"].notna() & working["permit_issue_date"].le(cutoff_date)].copy()
+    if working.empty:
+        return pd.DataFrame(columns=[join_key] + PERMIT_FEATURES)
+
+    if "permit_record_count" not in working.columns:
+        working["permit_record_count"] = 1
+    if "major_permit_flag" not in working.columns:
+        working["major_permit_flag"] = 0
+    working["permits_730d"] = (
+        working["permit_issue_date"]
+        .ge(cutoff_date - pd.Timedelta(days=730))
+        .fillna(False)
+        .astype(int)
+    )
+
+    return (
+        working.groupby(join_key)
+        .agg(
+            permit_count=("permit_record_count", "sum"),
+            major_permit_count=("major_permit_flag", "sum"),
+            permits_730d=("permits_730d", "sum"),
+        )
+        .reset_index()
+    )
+
+
+def _aggregate_rentsmart_before_cutoff(
+    rentsmart_df: pd.DataFrame,
+    *,
+    join_key: str,
+    cutoff_date: pd.Timestamp,
+) -> pd.DataFrame:
+    if join_key not in rentsmart_df.columns:
+        return pd.DataFrame(columns=[join_key] + RENTSMART_FEATURES)
+
+    date = pd.Series(pd.NaT, index=rentsmart_df.index, dtype="datetime64[ns]")
+    for column in ["violation_date", "date"]:
+        if column in rentsmart_df.columns:
+            date = date.fillna(pd.to_datetime(rentsmart_df[column], errors="coerce"))
+
+    working = rentsmart_df.loc[date.notna() & date.le(cutoff_date)].dropna(subset=[join_key]).copy()
+    if working.empty:
+        return pd.DataFrame(columns=[join_key] + RENTSMART_FEATURES)
+
+    complaint_cols = [
+        column
+        for column in working.columns
+        if any(token in column for token in ["complaint", "violation", "inspection", "issue", "type", "description"])
+    ]
+    complaint_signal = working[complaint_cols].notna().any(axis=1).astype(int) if complaint_cols else 1
+    working["rentsmart_record_count"] = 1
+    working["rentsmart_complaint_indicator"] = complaint_signal
+
+    return (
+        working.groupby(join_key)
+        .agg(
+            rentsmart_record_count=("rentsmart_record_count", "sum"),
+            rentsmart_complaint_indicator=("rentsmart_complaint_indicator", "max"),
+        )
+        .reset_index()
+    )
+
+
+def add_cutoff_safe_temporal_context_features(
+    modeling_df: pd.DataFrame,
+    risk_df: pd.DataFrame,
+    *,
+    permits_df: pd.DataFrame | None = None,
+    rentsmart_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Add permit/RentSmart features after filtering source records to the model cutoff."""
+    if "property_key" not in risk_df.columns or "training_cutoff_date" not in modeling_df.columns:
+        return modeling_df
+
+    cutoff_date = pd.to_datetime(modeling_df["training_cutoff_date"].iloc[0], errors="coerce")
+    if pd.isna(cutoff_date):
+        return modeling_df
+
+    lookup_cols = [
+        "property_key",
+        "assessment_map_par_id",
+        "assessment_pid",
+        "sam_map_par_id",
+        "address_zip_key",
+        "address_only_key",
+    ]
+    risk_lookup_cols = [column for column in lookup_cols if column in risk_df.columns]
+    property_lookup = (
+        modeling_df[["property_key"]]
+        .merge(risk_df[risk_lookup_cols].drop_duplicates("property_key"), on="property_key", how="left")
+        .drop_duplicates("property_key")
+        .reset_index(drop=True)
+    )
+
+    context_frames: list[pd.DataFrame] = []
+
+    if permits_df is not None:
+        permit_pairs = [
+            ("assessment_map_par_id", "map_par_id", True),
+            ("assessment_pid", "pid", True),
+            ("sam_map_par_id", "map_par_id", True),
+            ("address_zip_key", "address_zip_key", False),
+        ]
+        permit_aggregated = [
+            (left, right, identifier, _aggregate_permits_before_cutoff(permits_df, join_key=right, cutoff_date=cutoff_date))
+            for left, right, identifier in permit_pairs
+            if right in permits_df.columns
+        ]
+        context_frames.append(_merge_context_by_priority(property_lookup, permit_aggregated, PERMIT_FEATURES))
+
+    if rentsmart_df is not None:
+        rentsmart_pairs = [
+            ("assessment_map_par_id", "map_par_id", True),
+            ("sam_map_par_id", "map_par_id", True),
+            ("address_zip_key", "address_zip_key", False),
+            ("address_only_key", "address_only_key", False),
+        ]
+        rentsmart_aggregated = [
+            (left, right, identifier, _aggregate_rentsmart_before_cutoff(rentsmart_df, join_key=right, cutoff_date=cutoff_date))
+            for left, right, identifier in rentsmart_pairs
+            if right in rentsmart_df.columns
+        ]
+        context_frames.append(_merge_context_by_priority(property_lookup, rentsmart_aggregated, RENTSMART_FEATURES))
+
+    for context in context_frames:
+        if len(context.columns) > 1:
+            modeling_df = modeling_df.merge(context, on="property_key", how="left")
+
+    for column in PERMIT_FEATURES + RENTSMART_FEATURES:
+        if column in modeling_df.columns:
+            modeling_df[column] = modeling_df[column].fillna(0)
+    return modeling_df
+
+
 # ── Modeling frame ────────────────────────────────────────────────────────────
 
 def build_improved_modeling_frame(
@@ -162,6 +371,8 @@ def build_improved_modeling_frame(
     risk_df: pd.DataFrame,
     *,
     prediction_window_days: int = 365,
+    permits_df: pd.DataFrame | None = None,
+    rentsmart_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Temporal + static + owner features; also adds broader any-violation target."""
     modeling_df = build_property_level_modeling_frame(
@@ -171,16 +382,27 @@ def build_improved_modeling_frame(
         modeling_df["future_violation_count"].gt(0).astype(int)
     )
 
-    enriched_risk = add_owner_level_features(risk_df)
-    static_available = [c for c in ALL_STATIC_FEATURES if c in enriched_risk.columns]
+    if {"property_key", "assessment_owner_clean"}.issubset(risk_df.columns):
+        owner_lookup = risk_df[["property_key", "assessment_owner_clean"]].drop_duplicates("property_key")
+        modeling_df = modeling_df.merge(owner_lookup, on="property_key", how="left")
+    modeling_df = add_owner_level_features(modeling_df)
+
+    static_available = [c for c in LEAKAGE_SAFE_STATIC_FEATURES if c in risk_df.columns]
     new_cols = [c for c in static_available if c not in modeling_df.columns]
 
-    if new_cols:
+    if new_cols and "property_key" in risk_df.columns:
         modeling_df = modeling_df.merge(
-            enriched_risk[["property_key"] + new_cols].drop_duplicates("property_key"),
+            risk_df[["property_key"] + new_cols].drop_duplicates("property_key"),
             on="property_key",
             how="left",
         )
+
+    modeling_df = add_cutoff_safe_temporal_context_features(
+        modeling_df,
+        risk_df,
+        permits_df=permits_df,
+        rentsmart_df=rentsmart_df,
+    )
 
     return modeling_df
 
@@ -268,14 +490,20 @@ def run_improved_model(config: ImprovedModelConfig) -> Path:
         )
     )
     risk_df = pd.read_csv(config.property_risk_path, low_memory=False)
+    permits_df = _read_optional_context_csv(config.permits_context_path, PERMIT_CONTEXT_COLUMNS)
+    rentsmart_df = _read_optional_context_csv(config.rentsmart_context_path, RENTSMART_CONTEXT_COLUMNS)
 
     print("Building improved modeling frame...")
     modeling_df = build_improved_modeling_frame(
-        source_df, risk_df, prediction_window_days=config.prediction_window_days
+        source_df,
+        risk_df,
+        prediction_window_days=config.prediction_window_days,
+        permits_df=permits_df,
+        rentsmart_df=rentsmart_df,
     )
 
     behavioral_cols = [c for c in BEHAVIORAL_FEATURES if c in modeling_df.columns]
-    static_cols = [c for c in ALL_STATIC_FEATURES if c in modeling_df.columns]
+    static_cols = [c for c in MODEL_CONTEXT_FEATURES if c in modeling_df.columns]
     full_cols = behavioral_cols + static_cols
 
     targets = {
