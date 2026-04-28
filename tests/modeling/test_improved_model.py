@@ -108,6 +108,66 @@ def test_build_improved_modeling_frame_adds_broader_target_and_static_cols():
     assert any_viol >= high_risk
 
 
+def test_build_improved_modeling_frame_recomputes_owner_features_from_cutoff_history():
+    source_df = _make_violations_df()
+    risk_df = _make_risk_df()
+    risk_df["total_violations"] = 999
+    risk_df["history_high_risk_violations"] = 999
+
+    frame = build_improved_modeling_frame(source_df, risk_df, prediction_window_days=365)
+
+    landlord_a = frame.loc[frame["assessment_owner_clean"] == "landlord a"].iloc[0]
+    assert landlord_a["owner_property_count"] == 2
+    assert landlord_a["owner_total_violations"] == 2
+    assert landlord_a["owner_avg_violations_per_property"] == 1.0
+    assert landlord_a["owner_high_risk_share"] == 1.0
+    assert "service_request_count" not in frame.columns
+    assert "permit_count" not in frame.columns
+    assert "rentsmart_record_count" not in frame.columns
+
+
+def test_build_improved_modeling_frame_adds_only_cutoff_safe_dynamic_features():
+    source_df = _make_violations_df()
+    risk_df = _make_risk_df()
+    risk_df["assessment_map_par_id"] = [f"P{i}" for i in range(1, len(risk_df) + 1)]
+
+    permits_df = pd.DataFrame(
+        {
+            "map_par_id": ["P1", "P1", "P1", "P2"],
+            "permit_issue_date": ["2024-01-15", "2024-03-15", "2021-01-01", "2024-03-15"],
+            "major_permit_flag": [1, 1, 0, 1],
+            "permit_record_count": [1, 1, 1, 1],
+        }
+    )
+    rentsmart_df = pd.DataFrame(
+        {
+            "map_par_id": ["P1", "P1", "P1", "P2"],
+            "violation_date": ["2024-01-10", "2024-04-01", pd.NA, "2024-04-01"],
+            "violation_type": ["inspection", "inspection", "inspection", "inspection"],
+        }
+    )
+
+    frame = build_improved_modeling_frame(
+        source_df,
+        risk_df,
+        prediction_window_days=365,
+        permits_df=permits_df,
+        rentsmart_df=rentsmart_df,
+    )
+
+    first_property = frame.loc[frame["property_key"] == "10 main st|02118"].iloc[0]
+    assert first_property["permit_count"] == 2
+    assert first_property["major_permit_count"] == 1
+    assert first_property["permits_730d"] == 1
+    assert first_property["rentsmart_record_count"] == 1
+    assert first_property["rentsmart_complaint_indicator"] == 1
+
+    second_property = frame.loc[frame["property_key"] == "11 main st|02118"].iloc[0]
+    assert second_property["permit_count"] == 0
+    assert second_property["rentsmart_record_count"] == 0
+    assert "service_request_count" not in frame.columns
+
+
 def test_run_improved_model_writes_results_with_multiple_models(tmp_path: Path):
     violations_path = tmp_path / "violations_clean.csv"
     risk_path = tmp_path / "property_risk_table_v1.csv"
@@ -119,6 +179,8 @@ def test_run_improved_model_writes_results_with_multiple_models(tmp_path: Path):
         input_path=violations_path,
         raw_path=tmp_path / "missing_raw.csv",
         property_risk_path=risk_path,
+        permits_context_path=tmp_path / "missing_permits.csv",
+        rentsmart_context_path=tmp_path / "missing_rentsmart.csv",
         output_path=tmp_path / "improved_model_results.csv",
         feature_importance_path=tmp_path / "improved_model_feature_importance.csv",
         prediction_window_days=365,
