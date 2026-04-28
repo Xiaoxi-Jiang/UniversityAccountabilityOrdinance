@@ -9,8 +9,12 @@ __pycache__/
 .ipynb_checkpoints/
 outputs/figures/*.png
 outputs/tables/*.csv
+outputs/interactive/*.html
+outputs/interactive/*.js
+outputs/interactive/*.png
 !outputs/figures/.gitkeep
 !outputs/tables/.gitkeep
+!outputs/interactive/.gitkeep
 reports/figures/*.png
 !reports/figures/.gitkeep
 data/raw/*.csv
