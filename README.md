@@ -68,6 +68,7 @@ make install
 make prepare-data
 make pipeline
 make baseline-model
+make interactive-viz
 make fetch-rentsmart
 ```
 
@@ -75,6 +76,7 @@ What they do:
 - `make prepare-data`: downloads and cleans the source violations dataset
   and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available, including an automatic RentSmart fetch when no local extract is present
 - `make pipeline`: builds violations features, enriches them with SAM/geocoder, property assessment, parcels, 311, permits, ACS, and optional RentSmart/student-housing context, then generates EDA tables/figures and runs the baseline model
+- `make interactive-viz`: generates browser-based interactive HTML versions of the main EDA, student-housing, property-risk, and model-performance visualizations
 - the pipeline also writes a short narrative check-in summary and direct student-housing relationship outputs when student-housing context is available
 - `make baseline-model`: trains the property-level baseline model from cleaned violations history and saves both metrics and coefficient summaries
 - `make fetch-rentsmart`: downloads the public RentSmart Boston dashboard data into `data/raw/rentsmart.csv`
@@ -93,8 +95,11 @@ Generated outputs:
 - `data/processed/property_risk_table_v1.csv`
 - summary tables in `outputs/tables/`
 - exploratory figures in `outputs/figures/`
+- interactive HTML visualizations in `outputs/interactive/`, with `outputs/interactive/index.html` as the entry page
 - baseline model results in `outputs/tables/baseline_model_results.csv`
 - baseline model coefficient directions in `outputs/tables/baseline_model_feature_coefficients.csv`
+- improved model comparisons in `outputs/tables/improved_model_results.csv`
+- improved model feature importance in `outputs/tables/improved_model_feature_importance.csv`
 - direct student-housing relationship outputs in `outputs/tables/student_housing_relationship.csv`,
   `outputs/tables/student_housing_correlation_summary.csv`,
   and `outputs/figures/student_housing_relationship.png`
@@ -111,6 +116,8 @@ make install
 make prepare-data
 make pipeline
 make baseline-model
+make improved-model
+make interactive-viz
 make fetch-rentsmart
 make test
 ```

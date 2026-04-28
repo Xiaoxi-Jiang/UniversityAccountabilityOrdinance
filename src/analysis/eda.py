@@ -23,6 +23,10 @@ from src.viz.phase2_visualizations import (
     get_available_date_column,
     summarize_figure_results,
 )
+from src.viz.interactive_visualizations import (
+    InteractiveVisualizationConfig,
+    generate_interactive_visualizations,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,7 @@ class EDAConfig:
     input_path: Path = Path("data/processed/violations_clean.csv")
     tables_dir: Path = Path("outputs/tables")
     figures_dir: Path = Path("outputs/figures")
+    interactive_dir: Path = Path("outputs/interactive")
     property_risk_path: Path = Path("data/processed/property_risk_table_v1.csv")
     student_context_path: Path = Path("data/processed/student_housing_context_v1.csv")
 
@@ -38,6 +43,15 @@ class EDAConfig:
 class Phase2EDASummaryConfig:
     input_path: Path = Phase2FeatureConfig().input_path
     output_dir: Path = Path("outputs/tables")
+
+
+def _resolve_student_context_path(path: Path) -> Path:
+    if path.exists():
+        return path
+    summary_path = Path("data/processed/student_housing_summary_v1.csv")
+    if summary_path.exists():
+        return summary_path
+    return path
 
 
 def _load_prepared_violations(input_path: Path) -> pd.DataFrame:
@@ -633,6 +647,7 @@ def generate_student_housing_outputs(
 
 def run_eda(config: EDAConfig) -> tuple[list[Path], list[Path]]:
     """Generate summary tables and exploratory figures, plus optional context layers."""
+    student_context_path = _resolve_student_context_path(config.student_context_path)
     table_paths = generate_eda_tables(
         Phase2EDASummaryConfig(input_path=config.input_path, output_dir=config.tables_dir)
     )
@@ -646,13 +661,23 @@ def run_eda(config: EDAConfig) -> tuple[list[Path], list[Path]]:
             config.figures_dir,
         ),
         generate_student_housing_outputs(
-            config.student_context_path,
+            student_context_path,
             config.tables_dir,
             config.figures_dir,
         ),
     ]:
         table_paths.extend(table_group)
         figure_paths.extend(figure_group)
+
+    generate_interactive_visualizations(
+        InteractiveVisualizationConfig(
+            input_path=config.input_path,
+            tables_dir=config.tables_dir,
+            output_dir=config.interactive_dir,
+            property_risk_path=config.property_risk_path,
+            student_context_path=student_context_path,
+        )
+    )
     return table_paths, figure_paths
 
 
