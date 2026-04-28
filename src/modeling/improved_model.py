@@ -18,7 +18,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -442,17 +442,32 @@ def _classifiers(n_positive: int, n_negative: int, random_state: int) -> list[tu
 
 # ── CV evaluation ─────────────────────────────────────────────────────────────
 
-def _cv_metrics(model: Pipeline, X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold) -> dict[str, float]:
-    probas = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
-    preds = (probas >= 0.5).astype(int)
-    return {
-        "balanced_accuracy": round(float(balanced_accuracy_score(y, preds)), 4),
-        "precision": round(float(precision_score(y, preds, zero_division=0)), 4),
-        "recall": round(float(recall_score(y, preds, zero_division=0)), 4),
-        "f1": round(float(f1_score(y, preds, zero_division=0)), 4),
-        "roc_auc": round(float(roc_auc_score(y, probas)), 4),
-        "pr_auc": round(float(average_precision_score(y, probas)), 4),
-    }
+def _cv_metrics(model: Pipeline, X: pd.DataFrame, y: pd.Series, cv: TimeSeriesSplit) -> dict[str, float]:
+    metric_keys = ["balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+    fold_results: list[dict[str, float]] = []
+
+    for train_idx, test_idx in cv.split(X, y):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        # Skip folds where the test set contains only one class (roc_auc undefined)
+        if y_test.nunique() < 2:
+            continue
+        model.fit(X_train, y_train)
+        probas = model.predict_proba(X_test)[:, 1]
+        preds = (probas >= 0.5).astype(int)
+        fold_results.append({
+            "balanced_accuracy": float(balanced_accuracy_score(y_test, preds)),
+            "precision": float(precision_score(y_test, preds, zero_division=0)),
+            "recall": float(recall_score(y_test, preds, zero_division=0)),
+            "f1": float(f1_score(y_test, preds, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, probas)),
+            "pr_auc": float(average_precision_score(y_test, probas)),
+        })
+
+    n_valid = len(fold_results)
+    if not fold_results:
+        return {k: 0.0 for k in metric_keys} | {"valid_cv_folds": 0}
+    return {k: round(sum(m[k] for m in fold_results) / n_valid, 4) for k in metric_keys} | {"valid_cv_folds": n_valid}
 
 
 def _feature_importance(model: Pipeline, feature_cols: list[str]) -> pd.DataFrame:
@@ -511,7 +526,20 @@ def run_improved_model(config: ImprovedModelConfig) -> Path:
         "will_receive_high_risk_violation_next_period": "high_risk_violation",
     }
 
-    cv = StratifiedKFold(n_splits=config.cv_folds, shuffle=True, random_state=config.random_state)
+    # Sort by last_violation_date so TimeSeriesSplit respects temporal order:
+    # earlier-active properties train → later-active properties test.
+    sort_col = "last_violation_date"
+    if sort_col in modeling_df.columns:
+        modeling_df = (
+            modeling_df
+            .sort_values(sort_col, na_position="first")
+            .reset_index(drop=True)
+        )
+        print(f"Sorted modeling frame by {sort_col} for temporal CV.")
+    else:
+        print(f"Warning: {sort_col} not found; temporal ordering skipped.")
+
+    cv = TimeSeriesSplit(n_splits=config.cv_folds)
 
     all_results: list[dict] = []
     importance_rows: list[pd.DataFrame] = []
@@ -535,7 +563,7 @@ def run_improved_model(config: ImprovedModelConfig) -> Path:
                 pipeline = _make_pipeline(clf, feature_cols)
                 print(f"  [{feature_set_name}] {model_name} CV{config.cv_folds}...", end=" ", flush=True)
                 metrics = _cv_metrics(pipeline, X, y, cv)
-                print(f"roc_auc={metrics['roc_auc']:.4f}  pr_auc={metrics['pr_auc']:.4f}  recall={metrics['recall']:.4f}")
+                print(f"roc_auc={metrics['roc_auc']:.4f}  pr_auc={metrics['pr_auc']:.4f}  recall={metrics['recall']:.4f}  valid_folds={metrics.get('valid_cv_folds', '?')}")
 
                 row: dict = {
                     "target": target_col,

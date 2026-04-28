@@ -4,10 +4,10 @@
 This pipeline now treats the baseline task as a property-level prediction problem: given each property's historical violations up to the cutoff date, predict whether it will receive a new high-risk violation during the next prediction window.
 
 ## Data Processing Progress
-- Core cleaned violations table: `data\processed\violations_clean.csv`
-- Property-level feature table: `data\processed\violations_feature_table_v1.csv`
-- Enriched property-risk table: `data\processed\property_risk_table_v1.csv`
-- Student housing context output: `data\processed\student_housing_summary_v1.csv`
+- Core cleaned violations table: `data/processed/violations_clean.csv`
+- Property-level feature table: `data/processed/violations_feature_table_v1.csv`
+- Enriched property-risk table: `data/processed/property_risk_table_v1.csv`
+- Student housing context output: `data/processed/student_housing_summary_v1.csv`
 - Property-key coverage relies primarily on normalized address and ZIP joins; 99.9% of rows use address-based keys and 0.1% fall back to case numbers.
 - Context coverage from optional sources: SAM=yes, assessment=yes, parcels=yes, 311=yes, permits=yes, ACS=yes.
 - Owner coverage in the property-risk table: 88.5% (9287 of 10498 properties).
@@ -29,7 +29,7 @@ Top negative coefficient directions:
 
 ## Student Housing Relationship
 - Student housing is now analyzed directly with ZIP-level relationship outputs, including `student_housing_relationship.csv`, `student_housing_correlation_summary.csv`, and `student_housing_relationship.png`.
-- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4517, correlation between `Students per Property` and violation intensity = -0.1916.
+- Matched ZIP summary: 20 ZIP codes with student metric `all_students`; correlation with total violations = -0.4950, correlation between `Students per Property` and violation intensity = -0.2546.
 
 ## Preliminary Results and Interpretation
 - Modeling frame: 10186 properties, 35 positive examples (0.0034 positive rate).
