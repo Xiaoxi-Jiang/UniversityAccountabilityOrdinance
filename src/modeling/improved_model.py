@@ -442,27 +442,56 @@ def _classifiers(n_positive: int, n_negative: int, random_state: int) -> list[tu
 
 # ── CV evaluation ─────────────────────────────────────────────────────────────
 
+_PRECISION_AT_K = [10, 25, 50, 100]
+
+
+def _find_optimal_threshold(y_true: pd.Series, probas: np.ndarray) -> float:
+    """Sweep thresholds on the training split and return the one maximizing F1."""
+    best_f1, best_thresh = -1.0, 0.5
+    for thresh in np.linspace(0.05, 0.95, 19):
+        f = f1_score(y_true, (probas >= thresh).astype(int), zero_division=0)
+        if f > best_f1:
+            best_f1, best_thresh = f, float(thresh)
+    return best_thresh
+
+
+def _precision_at_k(y_true: pd.Series, probas: np.ndarray, k: int) -> float:
+    """Fraction of actual positives in the top-k highest-probability predictions."""
+    k = min(k, len(y_true))
+    if k <= 0:
+        return 0.0
+    top_k_idx = np.argsort(probas)[::-1][:k]
+    return float(y_true.iloc[top_k_idx].mean())
+
+
 def _cv_metrics(model: Pipeline, X: pd.DataFrame, y: pd.Series, cv: TimeSeriesSplit) -> dict[str, float]:
-    metric_keys = ["balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+    base_keys = ["balanced_accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
+    prec_at_k_keys = [f"precision_at_{k}" for k in _PRECISION_AT_K]
+    metric_keys = base_keys + prec_at_k_keys
     fold_results: list[dict[str, float]] = []
 
     for train_idx, test_idx in cv.split(X, y):
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        # Skip folds where the test set contains only one class (roc_auc undefined)
         if y_test.nunique() < 2:
             continue
         model.fit(X_train, y_train)
+        # Find optimal threshold on training split to avoid test-set leakage.
+        train_probas = model.predict_proba(X_train)[:, 1]
+        optimal_thresh = _find_optimal_threshold(y_train, train_probas)
         probas = model.predict_proba(X_test)[:, 1]
-        preds = (probas >= 0.5).astype(int)
-        fold_results.append({
+        preds = (probas >= optimal_thresh).astype(int)
+        fold_result: dict[str, float] = {
             "balanced_accuracy": float(balanced_accuracy_score(y_test, preds)),
             "precision": float(precision_score(y_test, preds, zero_division=0)),
             "recall": float(recall_score(y_test, preds, zero_division=0)),
             "f1": float(f1_score(y_test, preds, zero_division=0)),
             "roc_auc": float(roc_auc_score(y_test, probas)),
             "pr_auc": float(average_precision_score(y_test, probas)),
-        })
+        }
+        for k in _PRECISION_AT_K:
+            fold_result[f"precision_at_{k}"] = _precision_at_k(y_test, probas, k)
+        fold_results.append(fold_result)
 
     n_valid = len(fold_results)
     if not fold_results:
@@ -603,7 +632,12 @@ def run_improved_model(config: ImprovedModelConfig) -> Path:
 def _print_summary(results_df: pd.DataFrame) -> None:
     """Print a compact comparison table."""
     print("\n── Model Comparison (CV) ──────────────────────────────────────────")
-    cols = ["target_label", "feature_set", "model_name", "roc_auc", "pr_auc", "recall", "balanced_accuracy"]
+    cols = [
+        "target_label", "feature_set", "model_name",
+        "roc_auc", "pr_auc", "recall", "balanced_accuracy",
+        "precision_at_10", "precision_at_50", "precision_at_100",
+        "valid_cv_folds",
+    ]
     available = [c for c in cols if c in results_df.columns]
     print(results_df[available].to_string(index=False))
     print("────────────────────────────────────────────────────────────────────")

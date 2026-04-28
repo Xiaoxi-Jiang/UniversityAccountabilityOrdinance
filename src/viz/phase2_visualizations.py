@@ -87,10 +87,11 @@ def _derive_severity_proxy(df: pd.DataFrame) -> pd.Series | None:
         r"administrative|paperwork|documentation|sign|code"
     )
 
+    # Apply in ascending priority order so the highest severity wins on overlap.
     severity = pd.Series("uncategorized", index=df.index, dtype="string")
-    severity.loc[text.str.contains(severe_pattern, na=False)] = "high risk (proxy)"
-    severity.loc[text.str.contains(moderate_pattern, na=False)] = "medium risk (proxy)"
     severity.loc[text.str.contains(low_pattern, na=False)] = "low risk (proxy)"
+    severity.loc[text.str.contains(moderate_pattern, na=False)] = "medium risk (proxy)"
+    severity.loc[text.str.contains(severe_pattern, na=False)] = "high risk (proxy)"
     return severity
 
 

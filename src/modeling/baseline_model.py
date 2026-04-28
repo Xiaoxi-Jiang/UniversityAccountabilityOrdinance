@@ -12,13 +12,13 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     balanced_accuracy_score,
     f1_score,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -199,8 +199,15 @@ def run_baseline_model(config: BaselineModelConfig) -> Path:
         "history_high_risk_share",
     ]
     feature_columns = [column for column in feature_columns if column in modeling_df.columns]
+
+    # Sort by temporal column so train = earlier properties, test = later ones.
+    sort_col = "last_violation_date"
+    if sort_col in modeling_df.columns:
+        modeling_df = modeling_df.sort_values(sort_col, na_position="first").reset_index(drop=True)
+        print(f"Sorted modeling frame by {sort_col} for temporal train/test split.")
+
     X = modeling_df.loc[:, feature_columns].copy()
-    y = target
+    y = modeling_df["will_receive_high_risk_violation_next_period"]
 
     preprocessor = ColumnTransformer(
         transformers=[
@@ -224,13 +231,10 @@ def run_baseline_model(config: BaselineModelConfig) -> Path:
         ]
     )
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=config.test_size,
-        random_state=config.random_state,
-        stratify=y,
-    )
+    n_train = int(len(modeling_df) * (1 - config.test_size))
+    X_train, X_test = X.iloc[:n_train], X.iloc[n_train:]
+    y_train, y_test = y.iloc[:n_train], y.iloc[n_train:]
+
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)
     probabilities = model.predict_proba(X_test)[:, 1]
@@ -262,7 +266,8 @@ def run_baseline_model(config: BaselineModelConfig) -> Path:
                 "precision": round(float(precision_score(y_test, predictions, zero_division=0)), 4),
                 "recall": round(float(recall_score(y_test, predictions, zero_division=0)), 4),
                 "f1": round(float(f1_score(y_test, predictions, zero_division=0)), 4),
-                "roc_auc": round(float(roc_auc_score(y_test, probabilities)), 4),
+                "pr_auc": round(float(average_precision_score(y_test, probabilities)) if int(y_test.sum()) > 0 else 0.0, 4),
+                "roc_auc": round(float(roc_auc_score(y_test, probabilities)) if y_test.nunique() >= 2 else 0.0, 4),
                 "feature_count": len(feature_columns),
             }
         ]
@@ -299,6 +304,7 @@ def run_baseline_model(config: BaselineModelConfig) -> Path:
         f"precision={row['precision']:.4f}, "
         f"recall={row['recall']:.4f}, "
         f"f1={row['f1']:.4f}, "
+        f"pr_auc={row['pr_auc']:.4f}, "
         f"roc_auc={row['roc_auc']:.4f}"
     )
     print(f"Baseline model results saved to: {config.output_path}")
