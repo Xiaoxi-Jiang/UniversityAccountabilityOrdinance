@@ -473,7 +473,7 @@ def _cv_metrics(model: Pipeline, X: pd.DataFrame, y: pd.Series, cv: TimeSeriesSp
     for train_idx, test_idx in cv.split(X, y):
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        if y_test.nunique() < 2:
+        if y_train.nunique() < 2 or y_test.nunique() < 2:
             continue
         model.fit(X_train, y_train)
         # Find optimal threshold on training split to avoid test-set leakage.
