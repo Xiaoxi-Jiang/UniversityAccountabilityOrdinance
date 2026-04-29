@@ -65,11 +65,11 @@ Main entrypoints:
 
 ```bash
 make install
+make fetch-rentsmart
 make prepare-data
 make pipeline
 make baseline-model
 make interactive-viz
-make fetch-rentsmart
 ```
 
 What they do:
