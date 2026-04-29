@@ -44,6 +44,7 @@ def _print_pipeline_summary(
     table_paths: list[Path],
     figure_paths: list[Path],
     model_path: Path,
+    improved_model_path: Path,
     feature_date_col: str | None,
     trend_date_col: str | None,
     property_key_diagnostics: dict[str, float | int | list[str] | dict[str, int]],
@@ -59,6 +60,7 @@ def _print_pipeline_summary(
         f"Property risk table: {property_risk_path}",
         f"Student housing context: {student_context_path or 'skipped'}",
         f"Baseline model table: {model_path}",
+        f"Improved model table: {improved_model_path}",
         f"Feature date column available: {feature_date_col or 'none'}",
         f"Trend date column used: {trend_date_col or 'none'}",
         f"Unique property keys: {property_key_diagnostics['unique_property_keys']}",
@@ -154,7 +156,7 @@ def main() -> None:
         raw_path=DEFAULT_RAW_PATH,
         property_risk_path=property_risk_path,
     )
-    run_improved_model(improved_config)
+    improved_model_path = run_improved_model(improved_config)
     checkin_summary_path = write_checkin_summary(
         output_path=Path("outputs/checkin_summary.md"),
         feature_path=feature_path,
@@ -175,6 +177,7 @@ def main() -> None:
         table_paths=table_paths,
         figure_paths=figure_paths,
         model_path=model_path,
+        improved_model_path=improved_model_path,
         feature_date_col=feature_date_col,
         trend_date_col=trend_date_col,
         property_key_diagnostics=property_key_diagnostics,

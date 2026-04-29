@@ -45,7 +45,7 @@ class BaselineModelConfig:
     raw_path: Path = DEFAULT_RAW_PATH
     output_path: Path = Path("outputs/tables/baseline_model_results.csv")
     coefficients_output_path: Path = Path("outputs/tables/baseline_model_feature_coefficients.csv")
-    prediction_window_days: int = 365
+    prediction_window_days: int = 730
     test_size: float = 0.30
     random_state: int = 42
 
@@ -70,6 +70,46 @@ def _severity_count_columns(df: pd.DataFrame) -> pd.DataFrame:
             severity_counts[column] = 0
     keep_cols = ["property_key", *rename_map.values()]
     return severity_counts.loc[:, keep_cols]
+
+
+def _recent_severity_count_columns(
+    df: pd.DataFrame,
+    *,
+    date_col: str,
+    cutoff_date: pd.Timestamp,
+    window_days: int = 365,
+) -> pd.DataFrame:
+    """Count recent severity/open-history signals inside the pre-cutoff window."""
+    recent = df.loc[df[date_col].ge(cutoff_date - pd.Timedelta(days=window_days))].copy()
+    columns = [
+        "recent_high_risk_violation_count_365d",
+        "recent_medium_risk_violation_count_365d",
+        "recent_medium_or_high_risk_violation_count_365d",
+        "recent_open_violation_count_365d",
+    ]
+    if recent.empty:
+        return pd.DataFrame(columns=["property_key", *columns])
+
+    recent["_recent_high_risk"] = recent["severity_proxy"].astype("string").eq(HIGH_RISK_LABEL).astype(int)
+    recent["_recent_medium_risk"] = recent["severity_proxy"].astype("string").eq(MEDIUM_RISK_LABEL).astype(int)
+    recent["_recent_medium_or_high_risk"] = (
+        recent["severity_proxy"].astype("string").isin([MEDIUM_RISK_LABEL, HIGH_RISK_LABEL]).astype(int)
+    )
+    if "status" in recent.columns:
+        recent["_recent_open"] = recent["status"].astype("string").str.lower().eq("open").astype(int)
+    else:
+        recent["_recent_open"] = 0
+
+    return (
+        recent.groupby("property_key")
+        .agg(
+            recent_high_risk_violation_count_365d=("_recent_high_risk", "sum"),
+            recent_medium_risk_violation_count_365d=("_recent_medium_risk", "sum"),
+            recent_medium_or_high_risk_violation_count_365d=("_recent_medium_or_high_risk", "sum"),
+            recent_open_violation_count_365d=("_recent_open", "sum"),
+        )
+        .reset_index()
+    )
 
 
 def _safe_share(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
@@ -111,6 +151,12 @@ def build_property_level_modeling_frame(
     modeling_df = build_feature_table(historical)
     severity_counts = _severity_count_columns(historical)
     modeling_df = modeling_df.merge(severity_counts, on="property_key", how="left")
+    recent_severity_counts = _recent_severity_count_columns(
+        historical,
+        date_col=date_col,
+        cutoff_date=cutoff_date,
+    )
+    modeling_df = modeling_df.merge(recent_severity_counts, on="property_key", how="left")
 
     future_targets = (
         future.groupby("property_key")
@@ -119,6 +165,14 @@ def build_property_level_modeling_frame(
             future_high_risk_violation_count=(
                 "severity_proxy",
                 lambda values: int(values.astype("string").eq(HIGH_RISK_LABEL).sum()),
+            ),
+            future_medium_risk_violation_count=(
+                "severity_proxy",
+                lambda values: int(values.astype("string").eq(MEDIUM_RISK_LABEL).sum()),
+            ),
+            future_medium_or_high_risk_violation_count=(
+                "severity_proxy",
+                lambda values: int(values.astype("string").isin([MEDIUM_RISK_LABEL, HIGH_RISK_LABEL]).sum()),
             ),
         )
         .reset_index()
@@ -131,8 +185,14 @@ def build_property_level_modeling_frame(
         "history_medium_risk_violations",
         "history_low_risk_violations",
         "history_uncategorized_violations",
+        "recent_high_risk_violation_count_365d",
+        "recent_medium_risk_violation_count_365d",
+        "recent_medium_or_high_risk_violation_count_365d",
+        "recent_open_violation_count_365d",
         "future_violation_count",
         "future_high_risk_violation_count",
+        "future_medium_risk_violation_count",
+        "future_medium_or_high_risk_violation_count",
     ]
     for column in fill_zero_cols:
         if column in modeling_df.columns:
@@ -153,6 +213,9 @@ def build_property_level_modeling_frame(
     )
     modeling_df["will_receive_high_risk_violation_next_period"] = (
         modeling_df["future_high_risk_violation_count"].gt(0).astype(int)
+    )
+    modeling_df["will_receive_medium_or_high_risk_violation_next_period"] = (
+        modeling_df["future_medium_or_high_risk_violation_count"].gt(0).astype(int)
     )
     modeling_df["training_cutoff_date"] = cutoff_date.normalize()
     modeling_df["reference_date"] = reference_date.normalize()

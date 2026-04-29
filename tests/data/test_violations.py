@@ -83,6 +83,25 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
             "REASON": ["Unsanitary Conditions"],
         }
     )
+    historical_service_requests_df = pd.DataFrame(
+        {
+            "case_enquiry_id": ["101"],
+            "open_dt": ["2023-02-01"],
+            "case_status": ["closed"],
+            "case_title": ["Unsanitary Conditions"],
+            "subject": ["Inspectional Services"],
+            "reason": ["Housing"],
+            "type": ["Poor Conditions of Property"],
+            "department": ["ISD Housing"],
+            "neighborhood": ["South End"],
+            "ward": ["5"],
+            "location_street_name": ["12 Main St"],
+            "location_zipcode": ["02118"],
+            "latitude": [42.34],
+            "longitude": [-71.07],
+            "source_year": [2023],
+        }
+    )
     permits_df = pd.DataFrame(
         {
             "ADDRESS": ["12 Main St"],
@@ -134,6 +153,7 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
     parcels_df.to_csv(raw_dir / "parcels_current.csv", index=False)
     sam_df.to_csv(raw_dir / "sam_addresses.csv", index=False)
     service_requests_df.to_csv(raw_dir / "service_requests_311.csv", index=False)
+    historical_service_requests_df.to_csv(raw_dir / "311_historical_housing.csv", index=False)
     permits_df.to_csv(raw_dir / "building_permits.csv", index=False)
     acs_df.to_csv(raw_dir / "acs_context.csv", index=False)
     student_df.to_csv(raw_dir / "student_housing.csv", index=False)
@@ -167,6 +187,7 @@ def test_run_data_preparation_preloads_optional_phase1_sources(tmp_path, monkeyp
     assert (processed_dir / "parcels_clean.csv").exists()
     assert (processed_dir / "rentsmart_clean.csv").exists()
     assert (processed_dir / "service_requests_311_clean.csv").exists()
+    assert (processed_dir / "service_requests_311_historical.csv").exists()
     assert (processed_dir / "building_permits_clean.csv").exists()
     assert (processed_dir / "acs_context_clean.csv").exists()
     assert (processed_dir / "student_housing_clean.csv").exists()

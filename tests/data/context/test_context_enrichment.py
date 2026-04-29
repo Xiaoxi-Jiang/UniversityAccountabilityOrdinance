@@ -6,7 +6,12 @@ from src.data.context.address import clean_sam_addresses
 from src.data.context.common import download_arcgis_layer
 from src.data.context.permits import aggregate_permits, clean_permits
 from src.data.context.property import build_property_risk_table
-from src.data.context.service_requests import aggregate_service_requests, clean_service_requests
+from src.data.context.service_requests import (
+    ServiceRequestConfig,
+    aggregate_service_requests,
+    clean_service_requests,
+    load_historical_service_requests,
+)
 
 
 def test_clean_sam_addresses_builds_normalized_keys_and_ids():
@@ -67,6 +72,47 @@ def test_clean_service_requests_handles_new_system_schema():
 
     assert out.iloc[0]["service_request_open_date"].year == 2026
     assert out.iloc[0]["address_zip_key"] == "30 b st|02127"
+
+
+def test_load_historical_service_requests_uses_local_filtered_extract(tmp_path):
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+    raw_dir.mkdir()
+    processed_dir.mkdir()
+
+    pd.DataFrame(
+        {
+            "case_enquiry_id": ["101"],
+            "open_dt": ["2024-02-22 10:34:58"],
+            "case_status": ["Open"],
+            "case_title": ["Unsanitary Conditions"],
+            "subject": ["Inspectional Services"],
+            "reason": ["Housing"],
+            "type": ["Poor Conditions of Property"],
+            "department": ["ISD Housing"],
+            "neighborhood": ["South End"],
+            "ward": ["5"],
+            "location_street_name": ["12 Main St"],
+            "location_zipcode": ["02118"],
+            "latitude": [42.34],
+            "longitude": [-71.07],
+            "source_year": [2024],
+        }
+    ).to_csv(raw_dir / "311_historical_housing.csv", index=False)
+
+    out = load_historical_service_requests(
+        ServiceRequestConfig(
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+            historical_clean_output_path=processed_dir / "service_requests_311_historical.csv",
+        )
+    )
+
+    assert out is not None
+    assert (processed_dir / "service_requests_311_historical.csv").exists()
+    assert out.iloc[0]["address_zip_key"] == "12 main st|02118"
+    assert out.iloc[0]["housing_related_request_flag"] == 1
+    assert out.iloc[0]["source_year"] == 2024
 
 
 def test_aggregate_permits_derives_major_and_recent_signals():

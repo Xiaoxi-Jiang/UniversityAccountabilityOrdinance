@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 import io
 from pathlib import Path
@@ -24,6 +25,7 @@ from .common import (
 
 
 SERVICE_REQUESTS_PACKAGE_URL = "https://data.boston.gov/api/3/action/package_show?id=311-service-requests"
+SERVICE_REQUESTS_SQL_API_URL = "https://data.boston.gov/api/3/action/datastore_search_sql"
 HOUSING_RELATED_TOKENS = {
     "housing",
     "heat",
@@ -75,6 +77,27 @@ SERVICE_REQUEST_USECOLS = {
     "source",
     "report_source",
 }
+HISTORICAL_HOUSING_SERVICE_REQUEST_COLUMNS = (
+    "case_enquiry_id",
+    "open_dt",
+    "case_status",
+    "case_title",
+    "subject",
+    "reason",
+    "type",
+    "department",
+    "neighborhood",
+    "ward",
+    "location_street_name",
+    "location_zipcode",
+    "latitude",
+    "longitude",
+)
+HISTORICAL_HOUSING_FILTER_TERMS: dict[str, tuple[str, ...]] = {
+    "subject": ("Housing", "Inspectional"),
+    "reason": ("Housing", "Sanitation"),
+    "type": ("Pest", "Rodent", "Heat", "Bed Bug", "Lead", "Illegal"),
+}
 
 
 @dataclass(frozen=True)
@@ -86,9 +109,14 @@ class ServiceRequestConfig:
         "service_requests_311.xlsx",
         "service_requests_311.geojson",
     )
+    historical_candidates: tuple[str, ...] = ("311_historical_housing.csv",)
     service_requests_metadata_url: str = SERVICE_REQUESTS_PACKAGE_URL
     clean_output_path: Path = Path("data/processed/service_requests_311_clean.csv")
+    historical_clean_output_path: Path = Path("data/processed/service_requests_311_historical.csv")
     years_back: int = 1
+    historical_start_year: int = 2015
+    historical_end_year: int | None = None
+    historical_page_size: int = 5000
 
 
 def _normalize_identifier(value: object) -> str:
@@ -121,6 +149,36 @@ def _select_service_request_resources(
         if any(str(year) in name for year in years):
             selected.append(resource)
     return selected
+
+
+def _service_request_resource_year(resource: dict[str, Any]) -> int | None:
+    text = " ".join(
+        str(resource.get(key) or "")
+        for key in ["name", "description"]
+    )
+    match = re.search(r"\b(20\d{2})\b", text)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _select_historical_service_request_resources(
+    resources: list[dict[str, Any]],
+    *,
+    start_year: int,
+    end_year: int,
+) -> list[dict[str, Any]]:
+    selected_by_year: dict[int, dict[str, Any]] = {}
+    for resource in resources:
+        if str(resource.get("format", "")).upper() != "CSV":
+            continue
+        if not bool(resource.get("datastore_active")):
+            continue
+        year = _service_request_resource_year(resource)
+        if year is None or year < start_year or year > end_year:
+            continue
+        selected_by_year.setdefault(year, resource)
+    return [selected_by_year[year] for year in sorted(selected_by_year)]
 
 
 def _download_service_requests_bulk(
@@ -193,6 +251,116 @@ def _download_service_requests_bulk(
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(target_path, index=False)
+    return target_path
+
+
+def _historical_housing_where_sql() -> str:
+    clauses: list[str] = []
+    for column, terms in HISTORICAL_HOUSING_FILTER_TERMS.items():
+        for term in terms:
+            escaped = term.replace("'", "''")
+            clauses.append(f"{column} ILIKE '%{escaped}%'")
+    return " OR ".join(clauses)
+
+
+def _download_historical_housing_service_requests(
+    config: ServiceRequestConfig,
+    timeout: int = 60,
+    *,
+    force_refresh: bool = False,
+) -> Path | None:
+    target_path = config.raw_dir / config.historical_candidates[0]
+    if target_path.exists() and not force_refresh:
+        return target_path
+
+    try:
+        response = requests.get(config.service_requests_metadata_url, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+        resources = payload.get("result", {}).get("resources", [])
+    except Exception as exc:
+        print(f"Skipping historical 311 download: {exc}")
+        return None
+
+    end_year = config.historical_end_year
+    if end_year is None:
+        end_year = pd.Timestamp.today().year - 1
+    selected = _select_historical_service_request_resources(
+        resources,
+        start_year=config.historical_start_year,
+        end_year=end_year,
+    )
+    if not selected:
+        print("Skipping historical 311 download: no annual Datastore-backed CSV resources were found.")
+        return None
+
+    where_sql = _historical_housing_where_sql()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    total_saved = 0
+    with target_path.open("w", newline="", encoding="utf-8") as fout:
+        writer = csv.DictWriter(
+            fout,
+            fieldnames=[*HISTORICAL_HOUSING_SERVICE_REQUEST_COLUMNS, "source_year"],
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+
+        for resource in selected:
+            resource_id = resource.get("id")
+            year = _service_request_resource_year(resource)
+            if not resource_id or year is None:
+                continue
+
+            year_saved = 0
+            offset = 0
+            while True:
+                sql = (
+                    f'SELECT {", ".join(HISTORICAL_HOUSING_SERVICE_REQUEST_COLUMNS)} '
+                    f'FROM "{resource_id}" '
+                    f"WHERE ({where_sql}) "
+                    f"ORDER BY open_dt "
+                    f"LIMIT {config.historical_page_size} OFFSET {offset}"
+                )
+                try:
+                    response = requests.get(
+                        SERVICE_REQUESTS_SQL_API_URL,
+                        params={"sql": sql},
+                        timeout=timeout,
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception as exc:
+                    print(f"Skipping historical 311 page for {year} at offset {offset}: {exc}")
+                    break
+
+                if not payload.get("success"):
+                    print(f"Skipping historical 311 page for {year} at offset {offset}: API returned success=false")
+                    break
+
+                records = payload.get("result", {}).get("records", [])
+                if not records:
+                    break
+
+                for record in records:
+                    row = {column: record.get(column) for column in HISTORICAL_HOUSING_SERVICE_REQUEST_COLUMNS}
+                    row["source_year"] = year
+                    writer.writerow(row)
+
+                batch_size = len(records)
+                year_saved += batch_size
+                total_saved += batch_size
+                offset += config.historical_page_size
+                if batch_size < config.historical_page_size:
+                    break
+
+            print(f"Saved {year_saved:,} housing-related 311 rows for {year}.")
+
+    if total_saved == 0:
+        target_path.unlink(missing_ok=True)
+        print("Skipping historical 311 download: no housing-related rows were returned.")
+        return None
     return target_path
 
 
@@ -385,4 +553,23 @@ def load_service_requests(config: ServiceRequestConfig) -> pd.DataFrame | None:
 
     cleaned = clean_service_requests(load_local_tabular(raw_path))
     save_clean_output(cleaned, config.clean_output_path)
+    return cleaned
+
+
+def load_historical_service_requests(config: ServiceRequestConfig) -> pd.DataFrame | None:
+    """Load a housing-focused historical 311 table for leak-safe temporal modeling."""
+    raw_path = find_local_file(config.raw_dir, config.historical_candidates)
+    if raw_path is None:
+        raw_path = _download_historical_housing_service_requests(config)
+    if raw_path is None:
+        existing = load_existing_clean_output(config.historical_clean_output_path)
+        if existing is not None:
+            cleaned_existing = clean_service_requests(existing)
+            save_clean_output(cleaned_existing, config.historical_clean_output_path)
+            return cleaned_existing
+        print("Historical 311 service request data unavailable: no local filtered extract or CKAN Datastore export was found.")
+        return None
+
+    cleaned = clean_service_requests(load_local_tabular(raw_path))
+    save_clean_output(cleaned, config.historical_clean_output_path)
     return cleaned

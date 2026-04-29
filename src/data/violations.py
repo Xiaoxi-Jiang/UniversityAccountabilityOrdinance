@@ -93,6 +93,7 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
     )
     from src.data.context.service_requests import (
         ServiceRequestConfig,
+        load_historical_service_requests,
         load_service_requests,
     )
     from src.data.context.student_housing import (
@@ -117,6 +118,7 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
         raw_dir=config.raw_dir,
         processed_dir=config.processed_dir,
         clean_output_path=config.processed_dir / "service_requests_311_clean.csv",
+        historical_clean_output_path=config.processed_dir / "service_requests_311_historical.csv",
     )
     permit_config = PermitContextConfig(
         raw_dir=config.raw_dir,
@@ -159,6 +161,11 @@ def prepare_optional_phase1_sources(config: Phase1Config) -> dict[str, Path | No
     outputs["service_requests_311_clean"] = (
         service_request_config.clean_output_path
         if load_service_requests(service_request_config) is not None
+        else None
+    )
+    outputs["service_requests_311_historical"] = (
+        service_request_config.historical_clean_output_path
+        if load_historical_service_requests(service_request_config) is not None
         else None
     )
     outputs["building_permits_clean"] = (

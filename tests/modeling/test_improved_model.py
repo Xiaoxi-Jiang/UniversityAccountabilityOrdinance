@@ -86,6 +86,9 @@ def test_add_owner_level_features_aggregates_correctly():
     assert "owner_total_violations" in enriched.columns
     assert "owner_avg_violations_per_property" in enriched.columns
     assert "owner_high_risk_share" in enriched.columns
+    assert "owner_property_count_with_recent_violations" in enriched.columns
+    assert "owner_recent_violation_rate" in enriched.columns
+    assert "owner_open_violation_share" in enriched.columns
 
     landlord_a = enriched.loc[enriched["assessment_owner_clean"] == "landlord a"].iloc[0]
     assert landlord_a["owner_property_count"] == 2
@@ -96,15 +99,42 @@ def test_add_owner_level_features_aggregates_correctly():
 def test_build_improved_modeling_frame_adds_broader_target_and_static_cols():
     source_df = _make_violations_df()
     risk_df = _make_risk_df()
-    frame = build_improved_modeling_frame(source_df, risk_df, prediction_window_days=365)
+    student_housing_df = pd.DataFrame(
+        {
+            "zip": ["02118"],
+            "undergraduates": [800],
+            "graduates": [200],
+            "all_students": [1000],
+            "student_units": [400],
+        }
+    )
+    frame = build_improved_modeling_frame(
+        source_df,
+        risk_df,
+        prediction_window_days=365,
+        student_housing_df=student_housing_df,
+    )
 
     assert "will_receive_any_violation_next_period" in frame.columns
+    assert "will_receive_medium_or_high_risk_violation_next_period" in frame.columns
     assert "will_receive_high_risk_violation_next_period" in frame.columns
+    assert "recent_medium_or_high_risk_violation_count_365d" in frame.columns
+    assert "recent_open_violation_count_365d" in frame.columns
     assert "acs_median_household_income" in frame.columns
     assert "owner_property_count" in frame.columns
+    assert "owner_recent_violation_rate" in frame.columns
+    assert "student_all_students" in frame.columns
+    assert "students_per_modeled_property" in frame.columns
+    first_zip_row = frame.loc[frame["property_key"] == "10 main st|02118"].iloc[0]
+    assert first_zip_row["student_all_students"] == 1000
+    assert first_zip_row["student_units"] == 400
+    assert first_zip_row["students_per_modeled_property"] == 250
     # Broader target should have more positives than narrow target
     any_viol = frame["will_receive_any_violation_next_period"].sum()
+    medium_or_high = frame["will_receive_medium_or_high_risk_violation_next_period"].sum()
     high_risk = frame["will_receive_high_risk_violation_next_period"].sum()
+    assert any_viol >= medium_or_high
+    assert medium_or_high >= high_risk
     assert any_viol >= high_risk
 
 
@@ -136,6 +166,7 @@ def test_build_improved_modeling_frame_adds_only_cutoff_safe_dynamic_features():
             "map_par_id": ["P1", "P1", "P1", "P2"],
             "permit_issue_date": ["2024-01-15", "2024-03-15", "2021-01-01", "2024-03-15"],
             "major_permit_flag": [1, 1, 0, 1],
+            "occupancy_related_permit_flag": [1, 0, 0, 1],
             "permit_record_count": [1, 1, 1, 1],
         }
     )
@@ -146,6 +177,17 @@ def test_build_improved_modeling_frame_adds_only_cutoff_safe_dynamic_features():
             "violation_type": ["inspection", "inspection", "inspection", "inspection"],
         }
     )
+    service_requests_df = pd.DataFrame(
+        {
+            "address_zip_key": ["10 main st|02118", "10 main st|02118", "11 main st|02118"],
+            "service_request_open_date": ["2024-01-20", "2023-09-01", "2024-01-10"],
+            "housing_related_request_flag": [1, 1, 1],
+            "service_request_record_count": [1, 1, 1],
+            "type": ["Heat - Excessive Insufficient", "Pest Infestation", "Building Code Enforcement"],
+            "reason": ["Housing", "Sanitation", "Housing"],
+            "subject": ["Inspectional Services"] * 3,
+        }
+    )
 
     frame = build_improved_modeling_frame(
         source_df,
@@ -153,19 +195,33 @@ def test_build_improved_modeling_frame_adds_only_cutoff_safe_dynamic_features():
         prediction_window_days=365,
         permits_df=permits_df,
         rentsmart_df=rentsmart_df,
+        service_requests_df=service_requests_df,
     )
 
     first_property = frame.loc[frame["property_key"] == "10 main st|02118"].iloc[0]
     assert first_property["permit_count"] == 2
     assert first_property["major_permit_count"] == 1
+    assert first_property["occupancy_permit_count"] == 1
+    assert first_property["permits_365d"] == 1
     assert first_property["permits_730d"] == 1
+    assert first_property["major_permits_730d"] == 1
     assert first_property["rentsmart_record_count"] == 1
     assert first_property["rentsmart_complaint_indicator"] == 1
+    assert first_property["rentsmart_inspection_count"] == 1
+    assert first_property["service_request_count"] == 2
+    assert first_property["service_requests_90d"] == 1
+    assert first_property["service_requests_180d"] == 2
+    assert first_property["service_requests_365d"] == 2
+    assert first_property["prior_service_requests_365d"] == 0
+    assert first_property["service_request_growth_365_vs_prior"] == 2
+    assert first_property["heat_service_request_count"] == 1
+    assert first_property["pest_service_request_count"] == 1
 
     second_property = frame.loc[frame["property_key"] == "11 main st|02118"].iloc[0]
     assert second_property["permit_count"] == 0
     assert second_property["rentsmart_record_count"] == 0
-    assert "service_request_count" not in frame.columns
+    assert second_property["service_request_count"] == 1
+    assert second_property["building_code_service_request_count"] == 1
 
 
 def test_run_improved_model_writes_results_with_multiple_models(tmp_path: Path):
@@ -183,6 +239,10 @@ def test_run_improved_model_writes_results_with_multiple_models(tmp_path: Path):
         rentsmart_context_path=tmp_path / "missing_rentsmart.csv",
         output_path=tmp_path / "improved_model_results.csv",
         feature_importance_path=tmp_path / "improved_model_feature_importance.csv",
+        ablation_output_path=tmp_path / "improved_model_ablation.csv",
+        grouped_cv_output_path=tmp_path / "improved_model_grouped_cv.csv",
+        top_risk_output_path=tmp_path / "top_predicted_risk_properties.csv",
+        calibration_output_path=tmp_path / "model_score_calibration.csv",
         prediction_window_days=365,
         cv_folds=2,
         random_state=42,
@@ -197,6 +257,11 @@ def test_run_improved_model_writes_results_with_multiple_models(tmp_path: Path):
     assert "roc_auc" in results.columns
     assert "pr_auc" in results.columns
     assert results["model_name"].nunique() >= 2
+    assert "target_role" in results.columns
 
     # Full feature set should produce a row
     assert "behavioral_plus_static" in results["feature_set"].values
+    assert config.ablation_output_path.exists()
+    assert config.grouped_cv_output_path.exists()
+    assert config.top_risk_output_path.exists()
+    assert config.calibration_output_path.exists()

@@ -849,7 +849,16 @@ def _dashboard_student_data(config: InteractiveVisualizationConfig) -> dict[str,
 
 def _dashboard_model_data(config: InteractiveVisualizationConfig) -> dict[str, Any]:
     if not config.improved_model_results_path.exists():
-        return {"available": False, "records": [], "featureImportance": [], "metrics": []}
+        return {
+            "available": False,
+            "records": [],
+            "featureImportance": [],
+            "sourceContribution": [],
+            "groupedCv": [],
+            "calibration": [],
+            "topRisk": [],
+            "metrics": [],
+        }
 
     results = pd.read_csv(config.improved_model_results_path)
     metric_cols = [
@@ -870,6 +879,27 @@ def _dashboard_model_data(config: InteractiveVisualizationConfig) -> dict[str, A
             feature_df["abs_importance"] = pd.to_numeric(feature_df["importance"], errors="coerce").abs()
         feature_records = _records_for_dashboard(feature_df)
 
+    ablation_path = config.tables_dir / "improved_model_ablation.csv"
+    source_contribution_records: list[dict[str, Any]] = []
+    if ablation_path.exists():
+        ablation_df = pd.read_csv(ablation_path)
+        source_contribution_records = _records_for_dashboard(ablation_df)
+
+    grouped_cv_path = config.tables_dir / "improved_model_grouped_cv.csv"
+    grouped_cv_records: list[dict[str, Any]] = []
+    if grouped_cv_path.exists():
+        grouped_cv_records = _records_for_dashboard(pd.read_csv(grouped_cv_path))
+
+    calibration_path = config.tables_dir / "model_score_calibration.csv"
+    calibration_records: list[dict[str, Any]] = []
+    if calibration_path.exists():
+        calibration_records = _records_for_dashboard(pd.read_csv(calibration_path))
+
+    top_risk_path = config.tables_dir / "top_predicted_risk_properties.csv"
+    top_risk_records: list[dict[str, Any]] = []
+    if top_risk_path.exists():
+        top_risk_records = _records_for_dashboard(pd.read_csv(top_risk_path), limit=100)
+
     metric_labels = {
         "balanced_accuracy": "Balanced Accuracy",
         "precision": "Precision",
@@ -886,6 +916,10 @@ def _dashboard_model_data(config: InteractiveVisualizationConfig) -> dict[str, A
         "available": True,
         "records": records,
         "featureImportance": feature_records,
+        "sourceContribution": source_contribution_records,
+        "groupedCv": grouped_cv_records,
+        "calibration": calibration_records,
+        "topRisk": top_risk_records,
         "metrics": [{"id": metric, "label": metric_labels.get(metric, metric)} for metric in metric_cols],
     }
 
@@ -1170,6 +1204,7 @@ def _dashboard_html(data: dict[str, Any]) -> str:
       <section id="model" class="tab-panel">
         <div class="section-head">
           <h2>Cross-Validated Model Performance</h2>
+          <p class="note">Primary targets: any violation and medium-or-high violation. High-risk is shown as secondary because the positive class is very small.</p>
         </div>
         <div class="controls">
           <label>Target<select id="modelTarget"></select></label>
@@ -1183,8 +1218,24 @@ def _dashboard_html(data: dict[str, Any]) -> str:
         </div>
         <div class="grid one" style="margin-top:16px">
           <div class="panel">
-            <p class="note">Precision@K — if the model flags the top K highest-risk properties, what fraction are true positives? Higher is better; baseline random selection would equal the positive rate (~0.34%).</p>
+            <p class="note">Precision@K — if the model flags the top K highest-risk properties, what fraction are true positives? Higher is better; baseline random selection equals that target's positive rate.</p>
             <div id="precisionAtKChart" class="plot"></div>
+          </div>
+          <div class="panel">
+            <p class="note">Data source contribution uses the random-forest ablation sequence: behavioral history, static property/owner context, 311, permits, RentSmart, then student-housing ZIP context.</p>
+            <div id="sourceContributionChart" class="plot"></div>
+          </div>
+          <div class="panel">
+            <p class="note">ZIP grouped CV holds out whole ZIP groups to test whether performance survives geographic clustering.</p>
+            <div id="groupedCvChart" class="plot"></div>
+          </div>
+          <div class="panel">
+            <p class="note">Calibration is shown by out-of-fold risk decile. Use this as ranking evidence, not as a promise of exact probabilities.</p>
+            <div id="calibrationChart" class="plot"></div>
+          </div>
+          <div class="panel">
+            <p class="note">Top-risk properties are scored with the final random-forest model for the selected primary target. Context signals are non-zero fields ordered by global feature importance.</p>
+            <div id="topRiskTable" class="plot"></div>
           </div>
         </div>
       </section>
@@ -1221,9 +1272,16 @@ def _dashboard_html(data: dict[str, Any]) -> str:
         if (value === null || value === undefined) return "-";
         const explicit = {{
           any_violation: "Any Violation",
+          medium_or_high_violation: "Medium-or-High Violation",
           high_risk_violation: "High-Risk Violation",
+          baseline_lr: "Baseline LR",
           behavioral_only: "Behavioral Only",
           behavioral_plus_static: "Behavioral + Static",
+          plus_static_property: "+ Static Property",
+          plus_311: "+ 311",
+          plus_permits: "+ Permits",
+          plus_rentsmart: "+ RentSmart",
+          plus_student_housing: "+ Student Housing",
           logistic_regression: "Logistic Regression",
           random_forest: "Random Forest",
           xgboost: "XGBoost"
@@ -1494,6 +1552,11 @@ def _dashboard_html(data: dict[str, Any]) -> str:
         if (!DATA.model.available || !DATA.model.records.length) {{
           emptyPlot("modelMetricChart", "Model results unavailable.");
           emptyPlot("featureImportanceChart", "Feature importance unavailable.");
+          emptyPlot("precisionAtKChart", "Precision@K data unavailable.");
+          emptyPlot("sourceContributionChart", "Ablation table unavailable.");
+          emptyPlot("groupedCvChart", "Grouped-CV data unavailable.");
+          emptyPlot("calibrationChart", "Calibration data unavailable.");
+          emptyPlot("topRiskTable", "Top-risk property table unavailable.");
           return;
         }}
         const target = document.getElementById("modelTarget").value;
@@ -1556,6 +1619,123 @@ def _dashboard_html(data: dict[str, Any]) -> str:
             {{ hovermode: "x unified", legend: {{ orientation: "h", y: -0.28 }}, height: 380 }}
           ), plotConfig);
         }} else emptyPlot("precisionAtKChart", "Precision@K data unavailable — rerun make improved-model to generate.");
+
+        const sourceRows = (DATA.model.sourceContribution || [])
+          .filter(d => (d.target_label || d.target) === target && d[metric] !== null)
+          .sort((a,b) => Number(a.feature_layer_order || 0) - Number(b.feature_layer_order || 0));
+        if (sourceRows.length) {{
+          Plotly.react("sourceContributionChart", [{{
+            type: "bar",
+            x: sourceRows.map(d => pretty(d.feature_set)),
+            y: sourceRows.map(d => d[metric]),
+            marker: {{ color: sourceRows.map(d => Number(d["delta_" + metric] || 0) >= 0 ? "#0f766e" : "#dc2626") }},
+            customdata: sourceRows.map(d => [d.n_features, d.delta_roc_auc, d.delta_pr_auc, d.n_positive, d.valid_cv_folds]),
+            hovertemplate: "%{{x}}<br>" + labelFor(metric) + "=%{{y:.4f}}<br>Features=%{{customdata[0]}}<br>Δ ROC-AUC=%{{customdata[1]:.4f}}<br>Δ PR-AUC=%{{customdata[2]:.4f}}<br>Positive n=%{{customdata[3]}}<br>Valid folds=%{{customdata[4]}}<extra></extra>"
+          }}], plotLayout(
+            `Data Source Contribution — ${{pretty(target)}}`,
+            "Ablation Layer",
+            labelFor(metric),
+            {{ showlegend: false, yaxis: {{ title: labelFor(metric), range: [0, Math.min(1, Math.max(0.05, ...sourceRows.map(d => Number(d[metric] || 0))) * 1.18)] }} }}
+          ), plotConfig);
+        }} else emptyPlot("sourceContributionChart", "Ablation data unavailable — rerun make improved-model to generate.");
+
+        const groupedRows = (DATA.model.groupedCv || [])
+          .filter(d => (d.target_label || d.target) === target && d[metric] !== null);
+        if (groupedRows.length) {{
+          Plotly.react("groupedCvChart", [{{
+            type: "bar",
+            x: groupedRows.map(d => pretty(d.feature_set)),
+            y: groupedRows.map(d => d[metric]),
+            marker: {{ color: groupedRows.map((_, i) => COLORS[i % COLORS.length]) }},
+            customdata: groupedRows.map(d => [d.n_groups, d.valid_cv_folds, d.n_positive, d.pr_auc, d.precision_at_50]),
+            hovertemplate: "%{{x}}<br>" + labelFor(metric) + "=%{{y:.4f}}<br>ZIP groups=%{{customdata[0]}}<br>Valid folds=%{{customdata[1]}}<br>Positive n=%{{customdata[2]}}<br>PR-AUC=%{{customdata[3]:.4f}}<br>Precision@50=%{{customdata[4]:.4f}}<extra></extra>"
+          }}], plotLayout(
+            `ZIP Grouped CV — ${{pretty(target)}}`,
+            "Feature Set",
+            labelFor(metric),
+            {{ showlegend: false, yaxis: {{ title: labelFor(metric), range: [0, Math.min(1, Math.max(0.05, ...groupedRows.map(d => Number(d[metric] || 0))) * 1.18)] }} }}
+          ), plotConfig);
+        }} else emptyPlot("groupedCvChart", "ZIP grouped-CV data unavailable — rerun make improved-model to generate.");
+
+        const calibrationRows = (DATA.model.calibration || [])
+          .filter(d => (d.target_label || d.target) === target)
+          .sort((a,b) => Number(a.risk_decile || 0) - Number(b.risk_decile || 0));
+        if (calibrationRows.length) {{
+          const baseRate = Number(calibrationRows[0].base_positive_rate || 0);
+          Plotly.react("calibrationChart", [
+            {{
+              type: "scatter",
+              mode: "lines+markers",
+              name: "Observed rate",
+              x: calibrationRows.map(d => d.risk_decile),
+              y: calibrationRows.map(d => d.observed_positive_rate),
+              line: {{ color: "#0f766e", width: 3 }},
+              marker: {{ size: 8 }},
+              customdata: calibrationRows.map(d => [d.n_properties, d.positives, d.lift_vs_base_rate]),
+              hovertemplate: "Decile=%{{x}}<br>Observed rate=%{{y:.4f}}<br>Properties=%{{customdata[0]:,}}<br>Positives=%{{customdata[1]:,}}<br>Lift=%{{customdata[2]:.2f}}x<extra></extra>"
+            }},
+            {{
+              type: "scatter",
+              mode: "lines+markers",
+              name: "Mean predicted risk",
+              x: calibrationRows.map(d => d.risk_decile),
+              y: calibrationRows.map(d => d.mean_predicted_risk),
+              line: {{ color: "#2563eb", width: 2, dash: "dot" }},
+              marker: {{ size: 7 }},
+              hovertemplate: "Decile=%{{x}}<br>Mean predicted risk=%{{y:.4f}}<extra></extra>"
+            }},
+            {{
+              type: "scatter",
+              mode: "lines",
+              name: "Base rate",
+              x: calibrationRows.map(d => d.risk_decile),
+              y: calibrationRows.map(() => baseRate),
+              line: {{ color: "#64748b", width: 2, dash: "dash" }},
+              hovertemplate: "Base positive rate=%{{y:.4f}}<extra></extra>"
+            }}
+          ], plotLayout(
+            `Risk Decile Calibration — ${{pretty(target)}}`,
+            "Out-of-fold risk decile",
+            "Positive rate",
+            {{ hovermode: "x unified", yaxis: {{ title: "Positive rate", rangemode: "tozero" }} }}
+          ), plotConfig);
+        }} else emptyPlot("calibrationChart", "Calibration data unavailable for this target.");
+
+        const scoreColumn = "risk_score_" + target;
+        const topRiskRows = (DATA.model.topRisk || [])
+          .filter(d => d[scoreColumn] !== null && d[scoreColumn] !== undefined)
+          .slice()
+          .sort((a,b) => Number(b[scoreColumn] || 0) - Number(a[scoreColumn] || 0))
+          .slice(0, 12);
+        if (topRiskRows.length) {{
+          Plotly.react("topRiskTable", [{{
+            type: "table",
+            columnwidth: [2.1, 0.7, 1.6, 0.7, 0.7, 0.8, 0.8, 2.8],
+            header: {{
+              values: ["Property", "ZIP", "Owner", "Risk Score", "311 365d", "Building Code 311", "RentSmart", "Context Signals"],
+              fill: {{ color: "#e2e8f0" }},
+              align: "left"
+            }},
+            cells: {{
+              values: [
+                topRiskRows.map(d => d.property_key),
+                topRiskRows.map(d => d.violation_zip),
+                topRiskRows.map(d => d.assessment_owner_clean || ""),
+                topRiskRows.map(d => fmt(d[scoreColumn], 3)),
+                topRiskRows.map(d => fmt(d.service_requests_365d)),
+                topRiskRows.map(d => fmt(d.building_code_service_request_count)),
+                topRiskRows.map(d => fmt(d.rentsmart_record_count)),
+                topRiskRows.map(d => d.top_context_signals || "")
+              ],
+              align: "left"
+            }}
+          }}], {{
+            margin: {{ l: 0, r: 0, t: 8, b: 0 }},
+            height: 430,
+            font: {{ family: "Arial, sans-serif", size: 12, color: "#172033" }},
+            paper_bgcolor: "#ffffff"
+          }}, plotConfig);
+        }} else emptyPlot("topRiskTable", "Top-risk scoring table is only available for primary targets.");
       }}
 
       function activateTab(tabId) {{

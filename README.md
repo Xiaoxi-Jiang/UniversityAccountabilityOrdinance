@@ -10,8 +10,8 @@ This project studies off-campus student housing in Boston and builds a reproduci
 
 ## Measurable Project Goals
 1. Estimate student rental concentration by district and year.
-2. Identify high-risk property patterns using violation severity and frequency features.
-3. Build a baseline predictive model for whether a property will receive a new severe violation in the next period.
+2. Identify repeated-risk property patterns using violation severity, frequency, owner, 311, permit, RentSmart, and student-housing context.
+3. Build predictive ranking models for whether a property will receive any new violation or a medium/high-risk violation in the next period; high-risk-only results are reported as secondary because that positive class is sparse.
 4. Produce clear visualizations for district-level trends and property risk distributions.
 
 ## Data Sources and Collection Plan
@@ -74,9 +74,9 @@ make interactive-viz
 
 What they do:
 - `make prepare-data`: downloads and cleans the source violations dataset
-  and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available, including an automatic RentSmart fetch when no local extract is present
+  and preloads optional context tables into cleaned Phase 1 outputs when local files or public endpoints are available, including an automatic RentSmart fetch when no local extract is present and a housing-focused historical 311 export for temporal modeling
 - `make pipeline`: builds violations features, enriches them with SAM/geocoder, property assessment, parcels, 311, permits, ACS, and optional RentSmart/student-housing context, then generates EDA tables/figures and runs the baseline model
-- `make interactive-viz`: generates browser-based interactive HTML versions of the main EDA, student-housing, property-risk, and model-performance visualizations
+- `make interactive-viz`: generates browser-based interactive HTML versions of the main EDA, student-housing, property-risk, and model-performance visualizations, including model ablation, ZIP grouped-CV, calibration, and top-risk property views when improved-model tables are present
 - the pipeline also writes a short narrative check-in summary and direct student-housing relationship outputs when student-housing context is available
 - `make baseline-model`: trains the property-level baseline model from cleaned violations history and saves both metrics and coefficient summaries
 - `make fetch-rentsmart`: downloads the public RentSmart Boston dashboard data into `data/raw/rentsmart.csv`
@@ -87,6 +87,7 @@ Generated outputs:
 - `data/processed/property_assessment_clean.csv` when Property Assessment data is available
 - `data/processed/parcels_clean.csv` when Parcels data is available
 - `data/processed/service_requests_311_clean.csv` when 311 data is available
+- `data/processed/service_requests_311_historical.csv` when housing-focused annual 311 history is available
 - `data/processed/building_permits_clean.csv` when permit data is available
 - `data/processed/acs_context_clean.csv` when ACS ZIP context is available
 - `data/processed/rentsmart_clean.csv` when RentSmart data is available
@@ -100,6 +101,10 @@ Generated outputs:
 - baseline model coefficient directions in `outputs/tables/baseline_model_feature_coefficients.csv`
 - improved model comparisons in `outputs/tables/improved_model_results.csv`
 - improved model feature importance in `outputs/tables/improved_model_feature_importance.csv`
+- improved model ablation by data source in `outputs/tables/improved_model_ablation.csv`
+- ZIP grouped-CV robustness checks in `outputs/tables/improved_model_grouped_cv.csv`
+- calibration / risk-decile summaries in `outputs/tables/model_score_calibration.csv`
+- top predicted-risk property list in `outputs/tables/top_predicted_risk_properties.csv`
 - direct student-housing relationship outputs in `outputs/tables/student_housing_relationship.csv`,
   `outputs/tables/student_housing_correlation_summary.csv`,
   and `outputs/figures/student_housing_relationship.png`
@@ -182,11 +187,13 @@ Optional data notes:
 - Building permits are configured against Boston's public ArcGIS permits service and cached to `data/raw/` when available.
 - ACS ZIP context is pulled from the Census ACS 5-year API when a local extract is not present.
 - 311 service requests are pulled automatically from Boston Open Data's `311 Service Requests` CKAN package when a local `data/raw/service_requests_311.csv` file is not present. The loader combines the current-year CSV, previous-year CSV, and the `NEW SYSTEM` CSV when available.
+- a second 311 helper builds `data/processed/service_requests_311_historical.csv` from annual CKAN Datastore resources (or a local `data/raw/311_historical_housing.csv` extract) so the improved model can use long-run complaint history without temporal leakage. The improved model breaks 311 into heat, pest, sanitation, building/code-enforcement, recent-window, and one-year growth features.
 - RentSmart is treated as optional because the project can run without it, but a public dashboard export path is now available from [Boston.gov](https://www.boston.gov/departments/analytics-team/rentsmart-boston) and is attempted automatically during `make prepare-data` when no local extract is present.
 - Student housing uses a local file when present. If not, the pipeline falls back to a bundled ZIP-level summary derived from the official `Boston Student Housing Report` so the student-context layer can still run in summary form.
 - Expected local raw file names include:
   `data/raw/sam_addresses.csv`,
   `data/raw/service_requests_311.csv`,
+  `data/raw/311_historical_housing.csv`,
   `data/raw/building_permits.csv`,
   `data/raw/acs_context.csv`,
   `data/raw/student_housing.xlsx`, `data/raw/student_housing.csv`,
@@ -196,6 +203,16 @@ Optional data notes:
 - Student housing integration expects one of those local files. If missing, the pipeline logs the limitation and skips that layer.
 - A bundled fallback summary is stored at `data/reference/student_housing_zip_2023.csv`.
 - Property-risk enrichment now prefers SAM-normalized identifier joins before falling back to address+ZIP matches.
+
+## Modeling Interpretation
+The improved model is best interpreted as a prioritization/ranking tool rather than a deterministic prediction of exactly which property will violate code. The primary targets are `any_violation` and `medium_or_high_violation`; `high_risk_violation` remains in the output as a secondary analysis because the high-risk positive class is very small.
+
+For final reporting, use:
+- `improved_model_ablation.csv` to show each data-source layer's marginal contribution.
+- `improved_model_grouped_cv.csv` to show ZIP grouped-CV robustness against geographic leakage.
+- `model_score_calibration.csv` and Precision@K metrics to explain threshold/top-K prioritization.
+- `top_predicted_risk_properties.csv` to demonstrate an accountability use case with property, ZIP, owner, score, and context-signal fields.
+- `outputs/interactive/index.html` to present those same results interactively under the Model Performance tab.
 
 ## Contributing
 1. Create a feature branch.
